@@ -206,20 +206,32 @@ function readAllLearnings(): Learning[] {
 
   if (failures.length > 0) throw new LessonValidationError(failures);
 
-  // Newest first. Same-day lessons fall back to slug for a stable order.
-  const ordered = learnings.sort((a, b) =>
-    a.publishedAt === b.publishedAt
-      ? a.slug.localeCompare(b.slug)
-      : b.publishedAt.localeCompare(a.publishedAt),
-  );
+  /*
+   * Oldest first. Ordinals are assigned walking forward through this order,
+   * which is the only way lesson 001 is genuinely the first lesson.
+   *
+   * Deriving the ordinal from a newest-first array instead is what broke this
+   * before: the same-day tie-break sorted ascending while the ordinal formula
+   * assumed descending, so two lessons on one day came out numbered backwards.
+   */
+  const ascending = [...learnings].sort((a, b) => {
+    if (a.publishedAt !== b.publishedAt) {
+      return a.publishedAt.localeCompare(b.publishedAt);
+    }
+    // A calendar day cannot separate two lessons, so use the explicit counter.
+    const bySequence = (a.sequence ?? 0) - (b.sequence ?? 0);
+    if (bySequence !== 0) return bySequence;
+    // Last resort: arbitrary, but stable across builds.
+    return a.slug.localeCompare(b.slug);
+  });
 
-  // Ordinals count up from the oldest lesson, so lesson 001 never changes
-  // identity when a new one is published.
-  const total = ordered.length;
-  return ordered.map((learning, index) => ({
+  const numbered = ascending.map((learning, index) => ({
     ...learning,
-    ordinal: total - index,
+    ordinal: index + 1,
   }));
+
+  // The feed reads newest first, which is exactly this order reversed.
+  return numbered.reverse();
 }
 
 export function getAllLearnings(): Learning[] {

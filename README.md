@@ -154,9 +154,15 @@ estimatedMinutes: 1-60
 topics: string[]         # 1-6
 concepts: string[]       # 2-5, rendered as the card's tags
 originKind: recent-change | codebase-exploration
+sequence: number             # the permanent lesson number; highest existing + 1
 sourceFingerprint?: string   # optional, de-duplicates topics across days
 relatedSlugs?: string[]      # must resolve to real lessons
 ```
+
+`sequence` is what "Lesson 007" on the card counts. It exists because `publishedAt` is only a
+calendar day: when two lessons land on the same day, nothing else can say which came first, and
+guessing gets the numbering backwards. Never reuse or renumber one — validation rejects duplicates,
+and requires a sequence on every lesson that shares its date with another.
 
 `sourceFingerprint` is the first 24 hex characters of the SHA-256 of four **sanitised** parts joined
 by `|`:

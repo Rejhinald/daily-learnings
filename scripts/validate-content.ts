@@ -81,6 +81,28 @@ function main(): number {
   let failed = false;
   const slugs = new Set(learnings.map((learning) => learning.slug));
   const fingerprints = new Map<string, string>();
+  const sequences = new Map<number, string>();
+
+  // Two lessons sharing a publication day need distinct sequences, or nothing
+  // can say which came first and the lesson numbers come out arbitrary.
+  const byDate = new Map<string, typeof learnings>();
+  for (const learning of learnings) {
+    const sameDay = byDate.get(learning.publishedAt) ?? [];
+    sameDay.push(learning);
+    byDate.set(learning.publishedAt, sameDay);
+  }
+  for (const [date, sameDay] of byDate) {
+    if (sameDay.length < 2) continue;
+    const missing = sameDay.filter((l) => l.sequence === undefined);
+    if (missing.length > 0) {
+      console.error(
+        `  ✗ ${date}: ${sameDay.length} lessons share this date but ${missing.length} lack a "sequence", so their order is undefined: ${missing
+          .map((l) => l.slug)
+          .join(", ")}`,
+      );
+      failed = true;
+    }
+  }
 
   for (const learning of learnings) {
     const file = `${learning.publishedAt}-${learning.slug}.mdx`;
@@ -108,6 +130,18 @@ function main(): number {
         failed = true;
       }
       fingerprints.set(learning.sourceFingerprint, file);
+    }
+
+    // A duplicate sequence makes two lessons claim the same position.
+    if (learning.sequence !== undefined) {
+      const previous = sequences.get(learning.sequence);
+      if (previous) {
+        console.error(
+          `  ✗ ${file}: sequence ${learning.sequence} is already used by ${previous}`,
+        );
+        failed = true;
+      }
+      sequences.set(learning.sequence, file);
     }
 
     // A lesson with no code teaches nothing a paragraph could not.

@@ -97,9 +97,18 @@ estimatedMinutes: 5-8
 topics: [...]              # 1-6
 concepts: [...]            # 2-5, these render as the card's tags
 originKind: "recent-change" | "codebase-exploration"
+sequence: N                # REQUIRED. See below.
 sourceFingerprint: "..."   # see below
 relatedSlugs: []           # slugs of earlier lessons this builds on
 ```
+
+**Sequence.** This is the lesson's permanent number — the "Lesson 007" shown on the card. Read the
+`sequence` of every existing lesson in `src/content/learnings/` and use **the highest one plus one**.
+If somehow none have a sequence, use the number of existing lessons plus one.
+
+Never reuse a number, and never renumber an existing lesson. `publishedAt` is only a calendar day, so
+when two lessons land on the same day nothing else can say which came first — get this wrong and the
+lesson numbers come out backwards. Validation rejects duplicates.
 
 **Fingerprint.** Take the SHA-256 of these four sanitised parts joined by `|`, and use the first 24
 hex characters:

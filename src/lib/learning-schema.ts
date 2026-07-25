@@ -56,6 +56,15 @@ export const learningFrontmatterSchema = z.object({
   concepts: z.array(z.string().min(2).max(48)).min(2).max(5),
   originKind: z.enum(ORIGIN_KINDS).default("recent-change"),
   /**
+   * Publication counter, 1 for the first lesson ever and +1 each time.
+   *
+   * `publishedAt` is only a calendar day, so two lessons published on the same
+   * day cannot be ordered by date alone — and guessing (by slug, say) gets the
+   * lesson numbers backwards. This is the explicit answer to "which came
+   * first", and the daily generator sets it.
+   */
+  sequence: z.number().int().positive().optional(),
+  /**
    * Deterministic hash over sanitised signals only (generalised project label,
    * module category, symbol category, teaching topic). It exists to stop the
    * automation teaching the same thing twice and must never encode a real path.
