@@ -1,0 +1,21 @@
+# Machine-local denylist for the privacy scanner.
+#
+# Copy this file to `.private-denylist.txt` in the same directory and add the
+# terms that must never appear in a published lesson: client names, product
+# codenames, internal project names, customer names.
+#
+# `.private-denylist.txt` is gitignored ON PURPOSE. Committing a list of client
+# names to a public repository would publish exactly what the list exists to
+# protect. This example file is committed only to document the format.
+#
+# One term per line. Lines starting with # are ignored. Matching is
+# case-insensitive and on whole words, so short or generic terms (three
+# characters or fewer, or common English words) will produce false positives —
+# prefer distinctive names.
+#
+# Both `bun run validate:content` and `bun run safety:scan` load the file
+# automatically when it exists, and a match blocks the commit.
+
+# AcmeCorp
+# Northwind
+# project-bluebird

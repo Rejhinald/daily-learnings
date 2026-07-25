@@ -1,0 +1,426 @@
+@import "tailwindcss";
+
+/* next-themes writes `class="dark"` onto <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Design tokens.
+ *
+ * The palette is lifted from the Vitesse syntax theme used by Shiki, so the
+ * interface and the code samples read as one system instead of a UI wrapped
+ * around someone else's colours. Warm-neutral surfaces, desaturated ink.
+ */
+:root {
+  --surface-page: #f5f4f1;
+  --surface-card: #ffffff;
+  --surface-subtle: #edece7;
+  --surface-code: #fbfbf9;
+
+  --border-subtle: #e3e1da;
+  --border-strong: #cfccc2;
+
+  --text-primary: #2b2a26;
+  --text-secondary: #5c5a52;
+  --text-muted: #6e6b62;
+
+  --accent: #2c6e9b;
+  --accent-hover: #245a80;
+  --accent-soft: #e6eef5;
+  --accent-border: #bcd4e5;
+
+  /* Contrast-checked against --surface-card (#ffffff) and the *-soft chip
+     backgrounds; all clear 4.5:1 for normal text. */
+  --success: #1a6544;
+  --success-soft: #e3f0ea;
+
+  --warn: #8f4f22;
+  --warn-soft: #f6ebe1;
+
+  --danger: #a33a3a;
+
+  --shadow-card: 0 1px 2px rgb(43 42 38 / 0.05);
+  --shadow-raised: 0 2px 8px rgb(43 42 38 / 0.07);
+}
+
+.dark {
+  --surface-page: #0f0f0e;
+  --surface-card: #181816;
+  --surface-subtle: #211f1d;
+  --surface-code: #131312;
+
+  --border-subtle: #2c2a26;
+  --border-strong: #3d3a34;
+
+  --text-primary: #dbd7ca;
+  --text-secondary: #a5a093;
+  --text-muted: #8b8678;
+
+  --accent: #6ea6cf;
+  --accent-hover: #8cbbdd;
+  --accent-soft: #17242c;
+  --accent-border: #2f4a5c;
+
+  /* Contrast-checked against --surface-card (#181816) and the *-soft chip
+     backgrounds; all clear 4.5:1 for normal text. */
+  --success: #6cb694;
+  --success-soft: #142520;
+
+  --warn: #d4976c;
+  --warn-soft: #2a1e14;
+
+  --danger: #cb7676;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-raised: 0 2px 10px rgb(0 0 0 / 0.4);
+}
+
+@theme inline {
+  --color-page: var(--surface-page);
+  --color-card: var(--surface-card);
+  --color-subtle: var(--surface-subtle);
+  --color-code: var(--surface-code);
+
+  --color-line: var(--border-subtle);
+  --color-line-strong: var(--border-strong);
+
+  --color-ink: var(--text-primary);
+  --color-ink-secondary: var(--text-secondary);
+  --color-ink-muted: var(--text-muted);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-border: var(--accent-border);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-plex-serif), ui-serif, Georgia, serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, monospace;
+
+  --radius-card: 0.75rem;
+  --radius-inner: 0.5rem;
+  --radius-chip: 0.375rem;
+
+  --shadow-card: var(--shadow-card);
+  --shadow-raised: var(--shadow-raised);
+}
+
+@layer base {
+  * {
+    border-color: var(--border-subtle);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    /* Anchored headings clear the sticky header. */
+    scroll-padding-top: 5rem;
+  }
+
+  body {
+    background-color: var(--surface-page);
+    color: var(--text-primary);
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background-color: var(--accent-soft);
+    color: var(--text-primary);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/*
+ * Shiki renders both themes in one pass and stores each colour in a CSS
+ * variable, so switching themes is pure CSS with no re-highlighting and no
+ * flash of the wrong palette.
+ */
+.shiki,
+.shiki span {
+  color: var(--shiki-light);
+  /* Shiki writes its own theme background inline; the card supplies ours. */
+  background-color: transparent !important;
+}
+
+.dark .shiki,
+.dark .shiki span {
+  color: var(--shiki-dark);
+}
+
+.shiki {
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  tab-size: 2;
+}
+
+.shiki code {
+  display: grid;
+  min-width: max-content;
+}
+
+/* Line numbering is opt-in per block so short previews stay uncluttered. */
+.shiki-numbered .shiki code {
+  counter-reset: shiki-line;
+}
+
+.shiki-numbered .shiki .line::before {
+  counter-increment: shiki-line;
+  content: counter(shiki-line);
+  display: inline-block;
+  width: 1.75rem;
+  margin-right: 1.25rem;
+  text-align: right;
+  /* Full-strength muted ink, no opacity. At 0.55 these sat near 2.2:1, well
+     under the 4.5:1 minimum, which made them unreadable rather than subtle. */
+  color: var(--text-muted);
+  user-select: none;
+}
+
+/*
+ * Lesson typography.
+ *
+ * Prose is set in the serif of the Plex superfamily: a lesson is long-form
+ * reading, and the shift away from the interface sans marks where the chrome
+ * ends and the teaching begins.
+ */
+.lesson-prose {
+  font-family: var(--font-serif), ui-serif, Georgia, serif;
+  font-size: 1.0625rem;
+  line-height: 1.75;
+  color: var(--text-primary);
+}
+
+.lesson-prose > * + * {
+  margin-top: 1.15em;
+}
+
+.lesson-prose p {
+  /* ~66 characters at this size; measured, not guessed at from `ch`. */
+  max-width: 34rem;
+}
+
+.lesson-prose h2 {
+  font-family: var(--font-sans), sans-serif;
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  margin-top: 2.75rem;
+  margin-bottom: 0.875rem;
+  scroll-margin-top: 5.5rem;
+  color: var(--text-primary);
+}
+
+.lesson-prose h3 {
+  font-family: var(--font-sans), sans-serif;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 2rem;
+  margin-bottom: 0.625rem;
+  scroll-margin-top: 5.5rem;
+  color: var(--text-primary);
+}
+
+.lesson-prose h2 + *,
+.lesson-prose h3 + * {
+  margin-top: 0;
+}
+
+.lesson-prose strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.lesson-prose a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: 1px;
+  font-weight: 500;
+}
+
+.lesson-prose a:hover {
+  color: var(--accent-hover);
+}
+
+/*
+ * Heading anchors are wrappers, not links to somewhere else. Without this they
+ * inherit the link colour and underline above, and every heading reads as
+ * clickable body copy.
+ */
+.lesson-prose h2 > a,
+.lesson-prose h3 > a {
+  color: inherit;
+  font-weight: inherit;
+  text-decoration: none;
+}
+
+.lesson-prose ul,
+.lesson-prose ol {
+  max-width: 34rem;
+  padding-left: 1.35rem;
+}
+
+/*
+ * Custom bullets. `list-style: none` makes Safari/VoiceOver drop list
+ * semantics, so the MDX component map puts an explicit role="list" back on
+ * every prose list; the visual bullet is drawn by the ::before below.
+ */
+.lesson-prose ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.lesson-prose ul > li {
+  position: relative;
+  padding-left: 1.35rem;
+}
+
+.lesson-prose ul > li::before {
+  content: "";
+  position: absolute;
+  left: 0.3rem;
+  top: 0.72em;
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 1px;
+  background-color: var(--accent);
+  opacity: 0.65;
+}
+
+.lesson-prose ol {
+  list-style: decimal;
+}
+
+.lesson-prose ol > li::marker {
+  color: var(--text-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.8em;
+}
+
+.lesson-prose li + li {
+  margin-top: 0.4em;
+}
+
+.lesson-prose li > p {
+  margin-top: 0;
+}
+
+/* Inline code only — fenced blocks are replaced by the CodeBlock component. */
+.lesson-prose :not(pre) > code {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.85em;
+  padding: 0.15em 0.38em;
+  border-radius: 0.3rem;
+  background-color: var(--surface-subtle);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.lesson-prose blockquote {
+  border-left: 2px solid var(--accent-border);
+  padding-left: 1.15rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  max-width: 34rem;
+}
+
+.lesson-prose hr {
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  margin-block: 2.5rem;
+}
+
+.lesson-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-sans), sans-serif;
+  font-size: 0.9375rem;
+  display: block;
+  overflow-x: auto;
+}
+
+.lesson-prose th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0.5rem 0.85rem 0.5rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.lesson-prose td {
+  padding: 0.6rem 0.85rem 0.6rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
+  color: var(--text-secondary);
+}
+
+.lesson-prose td:first-child {
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/*
+ * Escape hatch for components embedded in a lesson (callouts, the knowledge
+ * check, the takeaway). Without it the prose measure and list styling above
+ * leak in and squeeze them inside their own cards.
+ */
+.lesson-prose .not-prose p,
+.lesson-prose .not-prose ul,
+.lesson-prose .not-prose ol,
+.lesson-prose .not-prose blockquote {
+  max-width: none;
+}
+
+.lesson-prose .not-prose ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.lesson-prose .not-prose ul > li::before {
+  content: none;
+}
+
+/* Text diagrams (data-flow arrows) are pre blocks without a language. */
+.lesson-prose pre.diagram {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  background-color: var(--surface-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-inner);
+  padding: 1.15rem 1.25rem;
+  overflow-x: auto;
+  color: var(--text-secondary);
+}

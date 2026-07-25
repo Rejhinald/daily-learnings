@@ -1,0 +1,120 @@
+/**
+ * Content gate.
+ *
+ * Checks every lesson before it can be built or committed: frontmatter matches
+ * the schema, filenames agree with their metadata, cross-links resolve, no two
+ * lessons repeat a fingerprint, and nothing private made it into the prose.
+ *
+ *   bun run validate:content
+ *
+ * Exits non-zero on any failure, which is what stops the daily automation from
+ * committing a broken or unsafe lesson.
+ */
+import fs from "node:fs";
+import path from "node:path";
+
+import { loadDenylist } from "../src/lib/denylist";
+import { CONTENT_DIR, getAllLearnings, LessonValidationError } from "../src/lib/learnings";
+import { hasBlockingFinding, scanText, type SafetyFinding } from "../src/lib/source-safety";
+
+function reportFindings(file: string, findings: SafetyFinding[]): void {
+  for (const finding of findings) {
+    const marker = finding.severity === "block" ? "✗" : "!";
+    console.error(
+      `  ${marker} ${file}:${finding.line}:${finding.column} [${finding.ruleId}] ${finding.description}`,
+    );
+    console.error(`      matched: ${finding.excerpt}`);
+  }
+}
+
+function main(): number {
+  // Fails closed: without a denylist the client-name rule would do nothing
+  // while this gate still reported success.
+  let extraTerms: string[];
+  try {
+    const denylist = loadDenylist();
+    extraTerms = denylist.terms;
+    console.log(
+      denylist.bypassed
+        ? "! Denylist bypassed via ALLOW_MISSING_DENYLIST=1 — client-name checking is OFF."
+        : `Loaded ${extraTerms.length} local denylist term(s).`,
+    );
+  } catch (error) {
+    console.error(`✗ ${error instanceof Error ? error.message : error}`);
+    return 1;
+  }
+
+  let learnings;
+  try {
+    learnings = getAllLearnings();
+  } catch (error) {
+    if (error instanceof LessonValidationError) {
+      console.error("\n✗ Frontmatter validation failed:\n");
+      console.error(error.failures.join("\n\n"));
+      return 1;
+    }
+    throw error;
+  }
+
+  if (learnings.length === 0) {
+    console.error("✗ No lessons found. The site needs at least one lesson.");
+    return 1;
+  }
+
+  let failed = false;
+  const slugs = new Set(learnings.map((learning) => learning.slug));
+  const fingerprints = new Map<string, string>();
+
+  for (const learning of learnings) {
+    const file = `${learning.publishedAt}-${learning.slug}.mdx`;
+    const fullPath = path.join(CONTENT_DIR, file);
+
+    // Cross-links must point at lessons that exist, or the page 404s in place.
+    for (const related of learning.relatedSlugs) {
+      if (!slugs.has(related)) {
+        console.error(`  ✗ ${file}: relatedSlugs references unknown lesson "${related}"`);
+        failed = true;
+      }
+      if (related === learning.slug) {
+        console.error(`  ✗ ${file}: relatedSlugs references itself`);
+        failed = true;
+      }
+    }
+
+    // A repeated fingerprint means the generator taught the same thing twice.
+    if (learning.sourceFingerprint) {
+      const previous = fingerprints.get(learning.sourceFingerprint);
+      if (previous) {
+        console.error(
+          `  ✗ ${file}: sourceFingerprint already used by ${previous} — the topic is a repeat`,
+        );
+        failed = true;
+      }
+      fingerprints.set(learning.sourceFingerprint, file);
+    }
+
+    // A lesson with no code teaches nothing a paragraph could not.
+    if (!learning.preview) {
+      console.error(`  ✗ ${file}: no fenced code block found — every lesson needs a snippet`);
+      failed = true;
+    }
+
+    const findings = scanText(fs.readFileSync(fullPath, "utf8"), { extraTerms });
+    if (findings.length > 0) {
+      reportFindings(file, findings);
+      if (hasBlockingFinding(findings)) failed = true;
+    }
+  }
+
+  if (failed) {
+    console.error("\n✗ Content validation failed.");
+    return 1;
+  }
+
+  console.log(
+    `\n✓ ${learnings.length} lesson(s) valid — schema, filenames, links, fingerprints and safety scan all pass.`,
+  );
+  return 0;
+}
+
+process.exit(main());

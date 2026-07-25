@@ -1,0 +1,55 @@
+{
+  "name": "daily-learnings",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A daily programming lesson generated from my own recent development work.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "bun run scripts/generate-feed.ts && next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "next typegen && tsc --noEmit",
+    "validate:content": "bun run scripts/validate-content.ts",
+    "safety:scan": "bun run scripts/safety-scan.ts",
+    "verify": "bun run validate:content && bun run lint && bun run typecheck && bun run build",
+    "new:lesson": "bun run scripts/new-lesson.ts",
+    "daily": "powershell -NoProfile -ExecutionPolicy Bypass -File automation/run-daily-learning.ps1"
+  },
+  "dependencies": {
+    "@mdx-js/loader": "^3.1.1",
+    "@mdx-js/react": "^3.1.1",
+    "@next/mdx": "^16.2.11",
+    "@types/mdx": "^2.0.14",
+    "clsx": "^2.1.1",
+    "gray-matter": "^4.0.3",
+    "lucide-react": "^1.26.0",
+    "next": "16.2.11",
+    "next-themes": "^0.4.6",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "remark-frontmatter": "^5.0.0",
+    "remark-gfm": "^4.0.1",
+    "server-only": "^0.0.1",
+    "shiki": "^4.3.1",
+    "tailwind-merge": "^3.6.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.11",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "ignoreScripts": [
+    "sharp",
+    "unrs-resolver"
+  ],
+  "trustedDependencies": [
+    "sharp",
+    "unrs-resolver"
+  ]
+}

@@ -1,0 +1,185 @@
+---
+title: "Types Vanish at Runtime: Parse at the Trust Boundary Instead of Casting"
+slug: "parse-at-the-trust-boundary-instead-of-casting"
+publishedAt: "2026-07-25"
+summary: "A TypeScript annotation describes what you hope arrived; it emits zero runtime checks. Here is why casting at an I/O boundary is a silent promise, and how a schema that returns a tagged result turns that promise into something the compiler can actually rely on."
+sourceProject: "Internal quoting and estimation web app"
+language: "TypeScript"
+difficulty: "intermediate"
+estimatedMinutes: 7
+topics:
+  - "TypeScript"
+  - "Input validation"
+  - "Route handlers"
+  - "Zod"
+  - "Type narrowing"
+  - "Trust boundaries"
+concepts:
+  - "Type erasure"
+  - "Assertion vs guard"
+  - "Parse, don't validate"
+  - "Discriminated results"
+  - "safeParse narrowing"
+originKind: "recent-change"
+sourceFingerprint: "5a7ab6bbd6edd7e419e8d945"
+relatedSlugs: []
+---
+
+## Today's idea
+
+A TypeScript type annotation is a note to the compiler, not a check on the data. Every type is erased before the code runs, so a value that arrived over the network is whatever the sender chose to send — regardless of what you called it.
+
+The fix is to **parse** untrusted input through a schema that hands back a tagged success-or-failure result, so the narrow type is *earned* rather than asserted.
+
+## Why it appeared
+
+This came up while wiring server-side handlers that accept JSON — request bodies, and a JSON-encoded filter payload carried in a query string. The handlers all shared a shape: read the raw value, annotate or cast it to the expected interface, then hand-check two or three fields before doing the work. It typechecks. Autocomplete lights up. It behaves perfectly for every well-formed request.
+
+Then a serializer on the sending side started emitting a slightly different shape than the interface described, and nothing threw. The mismatched entry fell through a loop, the filter silently did nothing, and the endpoint returned `200 OK`.
+
+That is the class of problem worth naming: not a crash, but a *quiet wrong answer* produced by code the compiler had already blessed. The same gap appears anywhere data enters a process — HTTP bodies, query strings, `JSON.parse` of stored state, webhook payloads, environment variables, and model responses.
+
+## Mental model
+
+Think of the type checker as a building's **access control policy**, and the runtime as the **front door**.
+
+The policy is a document. It says who may be in the server room. It is precise, it is enforced everywhere the document applies, and it is genuinely valuable — but it is a document. It cannot stop anyone from walking in.
+
+A type assertion (`as Visitor`) is writing a visitor's name in the log book because you assume they signed in. A parse is the turnstile: it physically checks the badge, and it is the only thing that can tell you "this person is not on the list."
+
+Here is the part worth internalising: **the policy is deleted at the door.** TypeScript compiles to JavaScript, and the compiler strips every annotation, interface and `as` on the way out. The policy governs the code you *write*; the turnstile governs the data that *arrives*. Without a turnstile, the log book is fiction — and a well-written fiction is more dangerous than an obvious one, because everyone downstream trusts it.
+
+## The snippet
+
+```ts
+import { z } from "zod";
+
+const QuoteInput = z.object({
+  customerId: z.string().min(1),
+  squareFeet: z.number().int().positive(),
+  tier: z.enum(["basic", "premium"]),
+});
+type QuoteInput = z.infer<typeof QuoteInput>;
+const RATE: Record<QuoteInput["tier"], number> = { basic: 180, premium: 250 };
+
+// WRONG: `as` is a claim made to the compiler; it emits no runtime code.
+export async function priceQuoteUnsafe(req: Request) {
+  const input = (await req.json()) as QuoteInput; // still unchecked bytes
+  // "1200" * undefined -> NaN, which JSON.stringify writes as null. No 400.
+  return Response.json({ total: input.squareFeet * RATE[input.tier] });
+}
+
+// RIGHT: safeParse returns a tagged union, so narrowing is earned.
+export async function priceQuote(req: Request) {
+  let body: unknown;
+  try { body = await req.json(); } catch { body = null; }
+
+  const parsed = QuoteInput.safeParse(body);
+  if (!parsed.success) {
+    return Response.json({ issues: parsed.error.issues }, { status: 400 });
+  }
+  const { squareFeet, tier } = parsed.data; // tier: "basic" | "premium"
+  return Response.json({ total: squareFeet * RATE[tier] });
+}
+```
+
+## Vocabulary that matters
+
+**Type erasure** — the fact that types exist only during compilation and are removed from the emitted JavaScript. It buys full static checking at zero runtime cost, and it is the entire reason `as QuoteInput` cannot protect the handler: there is no type left at the moment the bytes arrive. Forget it, and you will believe annotations are checks.
+
+**Type assertion (`as`)** — an instruction to treat an expression as a given type. It suppresses type errors and generates no code. It is the shortcut the unsafe handler takes, and the most common way unvalidated data enters a typed codebase. Without it you would be forced to justify the type, which is the point: `as` is legitimate only when *you* know something the compiler cannot, and network input is never that case.
+
+**`unknown` (vs `any`)** — the top type. Every value is assignable to it, but you may do almost nothing with it until you narrow it. `req.json()` resolves to `any` in most typings, and `any` spreads silently; landing the result in a variable typed `unknown` makes the compiler demand a parse. With `any`, checking is disabled for everything it touches downstream — including the arithmetic that produced `NaN`.
+
+**Schema** — a runtime value that describes a shape and knows how to check it. It validates, coerces where asked, and carries a static type alongside. It is the turnstile: the only artifact in the file that executes at request time. Without one, validation degrades into a hand-written `if (!a || !b)` that checks presence but not type, and drifts from the interface it is meant to guard.
+
+**`safeParse` and the tagged result** — a method returning `{ success: true; data: T } | { success: false; error: ZodError }`. It reports failure as a *value* rather than an exception, tagged by the literal `success` field, so the compiler forces you to handle failure before touching the data. The throwing variant (`.parse()`) turns a client's bad payload into an uncaught 500.
+
+**Type narrowing** — the compiler shrinking a union based on a runtime check it understands. It is what converts one `if` into a static guarantee for the rest of the function. Without it you reach for `as` again to get at `.data`, and you are back where you started.
+
+**`z.infer`** — a type-level operator that reads the static type out of a schema value, so the check and the type can never disagree. Hand-write an interface next to the schema instead, and the two drift the first time someone edits one of them.
+
+**Indexed access type (`QuoteInput["tier"]`)** — a type expression that reads a property's type out of an object type. It keys `RATE` to exactly the set of allowed tiers, so adding a third tier stops the build until you price it. Type it `Record<string, number>` instead and a missing tier yields `undefined`, then `NaN`, with no compile error.
+
+## Walkthrough
+
+**The schema and its derived type.** `QuoteInput` is declared twice on purpose: once as a `const` (a runtime object that can check things) and once as a `type` (a compile-time shape). TypeScript keeps values and types in separate declaration spaces, so this is legal and idiomatic. The important property is *direction* — the type is derived from the schema, not written beside it. One edit changes both.
+
+**The rate table.** `Record<QuoteInput["tier"], number>` links pricing to the same literal union the schema validates. Small thing, real payoff: the union is now load-bearing in two places, so widening it becomes a build failure rather than a silent `undefined`.
+
+**The unsafe handler.** One line does all the damage. `await req.json()` produces whatever the client sent; `as QuoteInput` renames it. The compiler is now certain `squareFeet` is a number and `tier` is one of two strings, and it is wrong about both. Send `squareFeet` as the string `"1200"` with a misspelled tier and the multiplication yields `NaN`, `JSON.stringify` turns `NaN` into `null`, and the caller receives `200 OK` with `{"total": null}`. Nothing logs. Nothing alerts.
+
+**The safe handler, in three moves.** First, the body is read into `unknown` inside a `try`, because malformed JSON is itself a client error and should not throw out of the handler. Second, `safeParse` runs the actual check and returns a result *value*. Third, the failure branch returns early with a 400 and the structured issues — and after that early return the compiler knows `parsed` is the success member, so `parsed.data` is fully typed. Earned, not asserted. The business logic below the guard is identical to the unsafe version, except every assumption it makes is now true.
+
+<Callout type="insight" title="The asymmetry to notice">
+The unsafe path has no fork in it at all. There is nowhere in that function where bad input *can* be detected — which is precisely why the bug surfaces as a wrong answer rather than an error.
+</Callout>
+
+## Data and control flow
+
+```
+            bytes on the wire (you control none of this)
+                          |
+                          v
+                 await req.json()  ->  any / unknown
+                          |
+         +----------------+----------------------+
+         |                                       |
+   [ as QuoteInput ]                     [ schema.safeParse ]
+         |                                       |
+  compile-time rename                    runtime inspection
+  (0 bytes emitted)                              |
+         |                          +------------+-------------+
+         v                          |                          |
+  "typed" junk flows in     { success: true,           { success: false,
+         |                     data: QuoteInput }         error: ZodError }
+         v                          |                          |
+   NaN / undefined                  v                          v
+   200 OK, wrong body         business logic            400 + issues[]
+```
+
+## Why this approach
+
+The honest simpler alternative is hand-written checks: `if (typeof body.squareFeet !== "number") return bad()`. That is real validation, and it is genuinely fine for one or two fields. It stops scaling for three reasons.
+
+**Drift.** The interface and the checks are two artifacts describing one shape, and only one of them runs. The moment someone adds a field to the interface, the checks silently under-verify. Deriving the type from the schema removes the second artifact entirely.
+
+**Partial coverage.** Hand checks tend to verify presence (`if (!body.tier)`) rather than domain (*is it one of the two legal tiers?*). Presence checks pass for `tier: "delux"` — exactly the typo class that reaches production.
+
+**Error reporting.** A schema gives you a structured list of every problem with a path, which is what a useful 400 body is made of. Hand checks give you the first problem, or a boolean.
+
+There is a cost, and it is worth stating plainly: a schema library is a dependency and a small parse expense, and schemas at every boundary are more code to read. The rule that keeps it proportional is **one parse per boundary, not one per function**. Parse where data enters, then pass the parsed type inward — interior functions get to trust their arguments, which is what the type system was always supposed to buy you.
+
+Note what this is *not*: a ban on `as`. Assertions are legitimate when you know something the compiler cannot verify — a DOM node you just created, or a value narrowed in a way the checker cannot follow. What makes the boundary different is that *nobody* knows the shape there, including you.
+
+## Common mistakes
+
+**Annotating instead of checking.** `const filters: FilterMap = JSON.parse(raw)` looks like validation and is not. `JSON.parse` returns `any`, and `any` is assignable to anything, so the compiler stays silent. Route the result through `unknown` first and it will demand a real check.
+
+**Using the throwing parse in a request handler with no catch.** `.parse()` is fine in a script or at startup, where crashing is the correct response to bad config. In a handler it converts a client's malformed payload into a server 500 — wrong status, wrong alert, often a stack trace in the response. Use the result-returning variant and map failure to 400 deliberately.
+
+**Guessing at error shapes.** `if ("errors" in err) { for (const e of err.errors) ... }` compiles even when the real property is named something else, and then the loop never runs. "Validation found no problems" and "validation never executed" become indistinguishable. Prefer `instanceof`, or the library's own tagged result, over string-literal property probes.
+
+## Mini exercise
+
+In a scratch file — no project code needed:
+
+1. Without any library, write `parseTier(raw: unknown): "basic" | "premium" | null`. Start from `const TIERS = ["basic", "premium"] as const;` and use `TIERS.find(t => t === raw)`. Notice you never write `as`: the union comes from the `as const` array, and `find` returns the narrow type or `undefined`. That is a parse in six lines.
+2. Now write the broken version: `const tier = raw as "basic" | "premium"`. Call both with the string `"delux"` and with the number `7`. Confirm that only one of them can tell the difference — and that neither produces a compile error.
+3. Add a `Record<"basic" | "premium", number>` rate table and index it with each result. Predict the value before running it: what does `RATE["delux" as "basic"]` evaluate to, and what is that multiplied by a number?
+
+<Quiz>
+  <Question q="Why does a type assertion on a network payload provide no runtime protection?">
+    Because types are erased during compilation. The assertion changes what the compiler permits you to write; it emits no JavaScript. At runtime the value is exactly the bytes that arrived.
+  </Question>
+  <Question q="What does a result-returning parse give you that a throwing parse does not, inside a request handler?">
+    Failure as a value with a literal tag. You must branch on `success` before touching `data`, the compiler enforces it, and you choose the HTTP status — so bad input becomes a deliberate 400 instead of an accidental 500.
+  </Question>
+  <Question q="What breaks if a lookup table is typed as Record<string, number> instead of being keyed to the tier union?">
+    You lose exhaustiveness. Adding a new tier no longer breaks the build, so the missing entry returns `undefined` at runtime and arithmetic on it yields `NaN` — a wrong answer with a 200 status, rather than a compile error.
+  </Question>
+</Quiz>
+
+<Takeaway>
+`as` is a promise **you** make to the compiler. A parse is a promise the **data** makes to you. Only one of those survives to runtime — so put a turnstile at every door where data enters, and let everything inside the building trust its badge.
+</Takeaway>
