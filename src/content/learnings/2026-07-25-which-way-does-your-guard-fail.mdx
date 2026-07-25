@@ -1,0 +1,191 @@
+---
+title: "When Your Safety Check Breaks, Which Way Does It Fail?"
+slug: "which-way-does-your-guard-fail"
+publishedAt: "2026-07-25"
+summary: "Every check that runs before your real code — a login check, a rate limit, an analytics filter — can itself break or be left unconfigured. When it does, the request either passes or it stops. That direction is a design decision, and choosing it by accident is how you either lock everyone out or leave the door wide open."
+sourceProject: "Internal marketing and lead-capture platform"
+language: "TypeScript"
+difficulty: "intermediate"
+estimatedMinutes: 7
+topics:
+  - "APIs"
+  - "Middleware"
+  - "Authentication"
+  - "Error handling"
+  - "Reliability"
+concepts:
+  - "Fail-open vs fail-closed"
+  - "Guards and middleware"
+  - "Safe defaults"
+  - "Silent failure"
+  - "Availability vs protection"
+originKind: "recent-change"
+sourceFingerprint: "9f3c1e7ab204d6f85c0a4b17"
+relatedSlugs:
+  - "parse-at-the-trust-boundary-instead-of-casting"
+---
+
+## The door that was never locked
+
+A team ships a permission check on their admin routes. It reads the caller's login token, confirms the person is an admin, and only then runs the real code. Textbook.
+
+To be careful, someone wraps the whole check in a `try/catch`, so a malformed token can never crash the server with a <Term of="500">500</Term>. Inside the catch they log the error and — this is the part to watch — let the request continue anyway. It looks defensive. It reviews clean. It ships.
+
+Months later the token service has a thirty-second hiccup. For those thirty seconds, *every* token check throws. Every throw lands in the catch. Every catch lets the request through.
+
+So for thirty seconds, the admin dashboard has no lock on it at all. Anyone who knocks gets in. And the whole time, the <Term>endpoint</Term> keeps answering <Term of="200 ok">200 OK</Term>, cheerful as ever. Nothing crashes. No alert fires. The graphs look normal. The only way you would ever find this is by reading the code.
+
+The bug was not the `try/catch`. The bug was that nobody ever decided *which way the check should fail.*
+
+## Every guard fails in some direction
+
+Here is the idea, in plain words first.
+
+Before your real code runs, you often put a small piece of code in front of it whose only job is to decide "should this request even be allowed to continue?" A login check. A rate limit. A little <Term>validation</Term> that drops junk analytics at the door. People call this piece a **guard** (or **middleware** — the same thing, code that sits in the middle, between the request arriving and your handler running).
+
+A guard always ends in exactly one of two ways: it lets the request through, or it stops it. There is no third door. "I'll decide later" is not a thing that exists while a request is waiting.
+
+So when a guard *can't* reach a clean verdict — the service it depends on is down, a config value is missing, the input is shaped in a way it didn't expect — it still has to pick one of those two doors. Letting the request through in that case is called **failing open.** Stopping it is called **failing closed.**
+
+That is the whole lesson. The direction your guard fails is a choice. If you don't make it on purpose, the code makes it for you — usually the wrong way.
+
+## Why a broken check is the dangerous moment
+
+It helps to see *why* this bites so hard.
+
+A guard has two jobs rolled into one: the happy path (the check passes, continue) and the sad path (the check fails, stop). Developers stare at the happy path all day. The sad path they meet once, in an incident, at the worst possible time.
+
+And the sad path splits again. "The check said no" is not the same as "the check couldn't run." The first is a normal answer. The second is a failure *of the guard itself* — and that failure almost always shows up when something else is already going wrong: a dependency is flapping, an env value didn't get set on this box, traffic spiked. That is precisely the moment you'd want your protection at its strongest.
+
+A bare `try/catch` that ends by continuing does the opposite. It quietly switches the guard off the instant trouble starts. Because the request still succeeds, you get a <Term>silent failure</Term>: no crash, no log line anyone reads, nothing on the dashboard — a wide-open door that can sit there for months. The guard didn't misbehave at <Term>runtime</Term>; it behaved exactly as written. It was just written to fail the wrong way.
+
+## The nightclub door, when the bouncer steps away
+
+Picture two people standing at two different doors of the same building.
+
+One is a bouncer at a members-only entrance. His job is to keep the wrong people out. Now he steps away for thirty seconds. What should happen while he's gone? Nobody gets in. The door stays shut. It's annoying for the members waiting outside, but the room stays protected. That's **fail closed** — when the checker is absent, the safe default is *no.*
+
+The other is a greeter handing out flyers at the main entrance. The flyer is a nice-to-have. If she steps away, you do not bolt the front door of the whole building and send customers home — you just let people walk in without a flyer. That's **fail open** — when the checker is absent, the safe default is *yes, carry on.*
+
+Same building, opposite correct answers. The difference is not the person. It's *what stands behind the door.* A guard in front of something valuable fails closed. A guard in front of something optional fails open. Get the two backwards and you either bolt the front doors during a routine staff break, or leave the vault open whenever the bouncer blinks.
+
+## Why not just wrap it in try/catch and move on?
+
+Every one of these is something a careful developer actually reaches for. Here's why each is only half an answer.
+
+**"Just catch the error and continue, so nothing ever 500s."** This makes *every* guard fail open by default. Perfect for the flyer greeter, catastrophic for the bouncer. It also hides the failure exactly when you need to know: the request succeeds, so no one learns the check stopped working.
+
+**"Then just make everything fail closed, to be safe."** Feels conservative, but availability has a cost too. Make your analytics filter fail closed and it will reject real traffic every time your two servers deploy a few minutes apart and don't yet share the same secret — a self-inflicted outage over data you could have collected anyway. "Refuse when unsure" is right for the vault, wrong for the flyer.
+
+**"Give the config a default value so the guard always runs."** For a protective check this is worse than nothing — a hardcoded fallback secret is a secret sitting in your repo. And it papers over the real issue: the two sides still have to agree on the value, and a baked-in default means you never notice when they don't.
+
+**"Log an alert on failure and keep going."** Do alert — but notice this answers a different question. Alerting tells you the guard broke. It does not tell you what to do with the request that's waiting *right now.* You still have to pick a door. The fix is both: choose the direction on purpose, *and* shout when you're forced onto the sad path.
+
+## What to do instead
+
+Make the failure direction a visible, deliberate part of each guard — not something buried in a `catch`.
+
+```ts
+type Handler = (req: Request) => Promise<Response>;
+
+// PROTECTS something → fail CLOSED.
+// If the check cannot run, assume the worst and refuse.
+function requireAdmin(verify: (token: string) => Promise<{ role: string }>) {
+  return (next: Handler): Handler => async (req) => {
+    const token = req.headers.get("authorization");
+    if (!token) return new Response("Unauthorized", { status: 401 });
+    try {
+      const user = await verify(token);            // may throw
+      if (user.role !== "admin") return new Response("Forbidden", { status: 403 });
+      return next(req);                            // verified → allow
+    } catch {
+      return new Response("Unauthorized", { status: 401 }); // broke → refuse
+    }
+  };
+}
+
+// GATES low-stakes traffic → fail OPEN.
+// If the check is not provisioned yet, do not block real requests.
+function ingestGuard(secret: string | undefined) {
+  return (next: Handler): Handler => async (req) => {
+    if (!secret) return next(req);                 // not configured → allow
+    const presented = req.headers.get("x-ingest");
+    if (presented === secret) return next(req);    // matches → allow
+    return new Response(null, { status: 202 });    // else quietly drop
+  };
+}
+```
+
+## Reading that, block by block
+
+**The two shapes are almost identical — and that's the point.** Both guards run before `next`, both end by either calling `next(req)` or returning a response. The only real difference is the answer they give when they *can't* do their job cleanly. That difference is the whole design.
+
+**`requireAdmin` refuses on every doubt.** No token: refuse. Wrong role: refuse. And critically, the `catch` returns a 401 — if `verify` throws because the token service is down, the guard treats "I couldn't check" the same as "you failed the check." When something stands behind the door, *unsure means no.*
+
+**`ingestGuard` allows on every doubt that isn't a real mismatch.** If the shared secret hasn't been set on this server yet, the guard steps aside and lets traffic flow, so the two services can deploy in any order without a blackout. It only stops a request when it has positive proof the request is bogus — a *present but wrong* secret — and even then it drops it quietly with a 202 rather than announcing "you failed," so a prober learns nothing.
+
+**Nothing here is hidden in a `catch`.** Each guard says, in plain sight, what it does when it's blind. A reviewer can see the direction without reconstructing it in their head.
+
+## What the two paths look like
+
+```
+                     guard cannot finish its job
+                                │
+              ┌─────────────────┴─────────────────┐
+         fail CLOSED                          fail OPEN
+      "refuse by default"                 "allow by default"
+              │                                  │
+   protects a resource                keeps traffic flowing
+   (auth, payments, quota)         (analytics, geo tag, flag)
+              │                                  │
+   wrong choice → outage             wrong choice → open door
+   (you lock everyone out)          (you protect nothing)
+```
+
+## Where this goes wrong in practice
+
+**A protective check that fails open by accident.** The classic is a permission guard whose `catch` logs and then continues. It reads as "robust" — it never crashes — but it has quietly turned "the checker is down" into "everyone's an admin." This is the failure story above, and it is the single most common version.
+
+**A guard that runs fine but trusts a forgeable input.** A rate limiter that keys off a client-supplied header, or an "is-admin" flag the caller sets on themselves, technically passes its check every time — on data the attacker controls. The guard isn't failing open in the catch; it's failing open at the <Term>trust boundary</Term>, because it never had anything real to check. Trust only values your own edge attaches, never values that rode in on the <Term>request body</Term> or a client header.
+
+**Fail-closed on something that didn't need protecting.** A feature-flag service goes down, the flag lookup is written to fail closed, and now the *entire* app returns errors because a non-critical toggle couldn't be read. The check was correct in isolation and wrong for what stood behind it.
+
+## Try this
+
+In a scratch file, write a tiny guard and a fake dependency that is always broken:
+
+```ts
+async function check(): Promise<boolean> {
+  throw new Error("dependency down"); // simulate an outage
+}
+
+// Version A
+async function guardA(next: () => string): Promise<string> {
+  try { await check(); return next(); }
+  catch { return next(); }            // continue on failure
+}
+
+// Version B
+async function guardB(next: () => string): Promise<string> {
+  try { await check(); return next(); }
+  catch { return "BLOCKED"; }         // refuse on failure
+}
+```
+
+Call each ten times with `check` throwing every single time, and count how often `next()` actually runs. Predict the two numbers before you run it. Then relabel in your head: if this guard were the login check on your admin dashboard, which version did you just ship — and would you have noticed, given that Version A never once threw an error?
+
+<Quiz>
+  <Question q="A guard protecting your admin dashboard hits an error while checking the caller's token. Which way should it fail, and why?">
+    **Fail closed** — refuse the request. If you can't confirm the caller is allowed, the only safe assumption is that they are not. Failing open would hand out access at exactly the moment something is already going wrong, and the endpoint would keep returning `200 OK` the whole time, so no one would notice.
+  </Question>
+  <Question q="Your analytics ingest guard needs a shared secret that only exists on both servers after they deploy. Why is failing open the right call there?">
+    Because the guard protects data quality, not access. Failing closed would drop real traffic every time the two sides deploy a few minutes apart — a self-inflicted outage over data that is nice-to-have. Failing open just briefly relaxes a low-stakes check until both sides agree on the secret.
+  </Question>
+  <Question q="Why is catching every error and then continuing dangerous on a permission check, even though it never crashes?">
+    It silently switches the guard off the instant anything goes wrong — usually the moment you most need it. The route keeps returning `200`, so nothing *looks* broken. That's a silent failure: a wide-open door that can live in production for months because no crash and no alert ever points at it.
+  </Question>
+</Quiz>
+
+<Takeaway>
+Every guard fails in some direction. Decide which one on purpose — fail closed to protect something, fail open to stay available — and never let a stray `try/catch` make that choice for you.
+</Takeaway>
