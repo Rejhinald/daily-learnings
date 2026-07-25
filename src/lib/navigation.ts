@@ -1,9 +1,10 @@
-import { BookOpen, FolderGit2, House, Tags } from "lucide-react";
+import { BookA, BookOpen, FolderGit2, House, Tags } from "lucide-react";
 
 export const NAV_ITEMS = [
   { href: "/", label: "Home", icon: House },
   { href: "/topics", label: "Topics", icon: Tags },
   { href: "/projects", label: "Projects", icon: FolderGit2 },
+  { href: "/glossary", label: "Glossary", icon: BookA },
   { href: "/about", label: "About", icon: BookOpen },
 ] as const;
 

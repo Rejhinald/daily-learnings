@@ -169,8 +169,25 @@ It contains no paths and nothing client-identifying. It exists so the generator 
 same thing twice.
 
 Components available inside any lesson without an import: `<Callout type="note|insight|warning">`,
-`<Flow>`, `<Quiz>` / `<Question q="...">`, `<Takeaway>`. A fenced code block **with** a language tag
-becomes a highlighted code block; a fence **without** one renders as a text diagram.
+`<Flow>`, `<Quiz>` / `<Question q="...">`, `<Takeaway>`, `<Term>`. A fenced code block **with** a
+language tag becomes a highlighted code block; a fence **without** one renders as a text diagram.
+
+### The glossary
+
+Jargon is the main thing that makes a lesson bounce off a reader, so the lessons mark it inline:
+
+```mdx
+<Term>trust boundary</Term>          looks the term up as written
+<Term of="200 ok">200 OK</Term>      when the display text differs from the key
+```
+
+The word gets a dotted underline, and the plain-English meaning appears on hover, on tap, or on
+keyboard focus — **with no JavaScript**, using `:hover` and `:focus-within`. Definitions live once in
+[`src/lib/glossary.ts`](src/lib/glossary.ts) so the same word is always explained the same way, and
+the whole dictionary is browsable at `/glossary`.
+
+`bun run validate:content` fails the build if a lesson references a term that is not in the glossary,
+since an unknown key would silently render as ordinary text and the reader would lose the definition.
 
 ---
 
@@ -186,27 +203,37 @@ Windows Task Scheduler → automation/run-daily-learning.ps1
     ↓
 take a lock (never two runs at once)
     ↓
-check prerequisites, confirm the git remote, fast-forward main
+check prerequisites, confirm the remote and the branch, fast-forward main
     ↓
-SNAPSHOT every source repository  (branch + HEAD + working-tree status)
+SNAPSHOT every source repository  (branch + HEAD + full working-tree status)
     ↓
-run Claude Code, non-interactive, narrow permissions  →  writes ONE .mdx file
+build a read-only git digest of recent activity
     ↓
-RE-CHECK every source repository  →  any change aborts the run
+run Claude Code, non-interactive, no shell  →  writes ONE .mdx file
+    ↓
+RE-CHECK every source repository, and this one  →  any change aborts the run
     ↓
 validate content → lint → typecheck → production build
     ↓
 stage only the new lesson → privacy scan on the staged diff
     ↓
-commit → push to origin/main → Vercel deploys
+commit (pathspec-scoped) → push → verify origin/main actually moved
 ```
 
-**The division of responsibility is deliberate.** Claude is granted permission to read, search, write
-inside this repository, and run *read-only* git commands. It is explicitly denied `add`, `commit`,
-`push`, `reset`, `clean`, `checkout`, `stash`, `rebase`, `merge`, `pull`, `remote`, file deletion,
-reading `.env` files, and network tools. Every gate that could cause damage — the integrity check,
-validation, the privacy scan, the commit, the push — is owned by the script, not the model.
-`--dangerously-skip-permissions` is never used.
+**The division of responsibility is deliberate.** Claude may read and search, and write to
+`src/content/learnings/` — nothing else. It has **no shell at all**, and no network tools.
+
+That last part is not paranoia, it is a measured decision. Claude Code's permission rules are
+*prefix* matches, and a real invocation looks like `git -C <path> log …`. That string matches neither
+`Bash(git log:*)` nor `Bash(git commit:*)` — so a read-only allow-list silently blocks all
+inspection, while a broader `Bash(git:*)` grant silently *permits* `git -C <path> commit`. Both
+behaviours were verified experimentally, the second by accidentally creating a commit in a source
+repository during testing. Since the rules cannot separate reading from writing, the script runs the
+read-only git commands itself and hands Claude a digest.
+
+Every gate that could cause damage — the integrity check, validation, the privacy scan, the commit,
+the push — is owned by the script, not the model. `--dangerously-skip-permissions` is never used, and
+the push is never forced.
 
 Nothing is pushed unless every gate passes. Failures leave a clean local state and a non-zero exit
 code.

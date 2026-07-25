@@ -14,8 +14,25 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { loadDenylist } from "../src/lib/denylist";
+import { lookupTerm } from "../src/lib/glossary";
 import { CONTENT_DIR, getAllLearnings, LessonValidationError } from "../src/lib/learnings";
 import { hasBlockingFinding, scanText, type SafetyFinding } from "../src/lib/source-safety";
+
+/**
+ * Finds every `<Term>` in a lesson and returns the glossary keys it asks for.
+ * `<Term of="x">y</Term>` looks up x; `<Term>y</Term>` looks up y.
+ */
+function termKeys(body: string): string[] {
+  const keys: string[] = [];
+  const pattern = /<Term(?:\s+of="([^"]*)")?\s*>([\s\S]*?)<\/Term>/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(body)) !== null) {
+    // Strip markdown emphasis and code ticks from the display text before
+    // using it as a key, so <Term>`any`</Term> resolves to "any".
+    keys.push((match[1] ?? match[2]).replace(/[`*_]/g, "").trim());
+  }
+  return keys;
+}
 
 function reportFindings(file: string, findings: SafetyFinding[]): void {
   for (const finding of findings) {
@@ -97,6 +114,17 @@ function main(): number {
     if (!learning.preview) {
       console.error(`  ✗ ${file}: no fenced code block found — every lesson needs a snippet`);
       failed = true;
+    }
+
+    // An unknown glossary key renders as plain text, so the reader silently
+    // loses the definition. Catch it here instead of shipping a dead term.
+    for (const key of termKeys(learning.body)) {
+      if (!lookupTerm(key)) {
+        console.error(
+          `  ✗ ${file}: <Term> refers to "${key}", which is not in src/lib/glossary.ts`,
+        );
+        failed = true;
+      }
     }
 
     const findings = scanText(fs.readFileSync(fullPath, "utf8"), { extraTerms });

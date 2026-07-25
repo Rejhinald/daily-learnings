@@ -412,6 +412,80 @@
   content: none;
 }
 
+/*
+ * Inline glossary terms.
+ *
+ * No JavaScript: the panel is revealed by :hover and :focus-within. Tapping on
+ * a touch device focuses the button, which is what makes this work on phones.
+ */
+.dl-term {
+  position: relative;
+}
+
+.dl-term-trigger {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: help;
+  /* A dotted underline reads as "explained", not as "goes somewhere else" —
+     which a solid underline in the link colour would. */
+  text-decoration: underline dotted var(--accent);
+  text-underline-offset: 0.22em;
+  text-decoration-thickness: 1px;
+  text-align: left;
+}
+
+.dl-term-trigger:hover {
+  text-decoration-color: var(--accent-hover);
+  background-color: var(--accent-soft);
+}
+
+.dl-term-panel {
+  position: absolute;
+  bottom: calc(100% + 0.5rem);
+  left: 0;
+  z-index: 30;
+  display: block;
+  width: max-content;
+  max-width: min(22rem, calc(100vw - 2.5rem));
+  white-space: normal;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-inner);
+  background-color: var(--surface-card);
+  box-shadow: var(--shadow-raised);
+  padding: 0.7rem 0.85rem;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease;
+}
+
+.dl-term:hover .dl-term-panel,
+.dl-term:focus-within .dl-term-panel {
+  opacity: 1;
+  visibility: visible;
+}
+
+.dl-term-head {
+  display: block;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+}
+
+.dl-term-def {
+  display: block;
+  font-family: var(--font-sans), sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
 /* Text diagrams (data-flow arrows) are pre blocks without a language. */
 .lesson-prose pre.diagram {
   font-family: var(--font-mono), monospace;

@@ -4,6 +4,7 @@ import { isValidElement } from "react";
 
 import { CodeBlock } from "@/components/code-block";
 import { Callout, Flow, Question, Quiz, Takeaway } from "@/components/mdx-ui";
+import { Term } from "@/components/term";
 import { toSlug } from "@/lib/learnings";
 
 /**
@@ -123,5 +124,6 @@ export function useMDXComponents(): MDXComponents {
     Quiz,
     Question,
     Takeaway,
+    Term,
   };
 }
