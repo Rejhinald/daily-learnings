@@ -44,6 +44,12 @@ WORK_REPO_ROOT="${WORK_REPO_ROOT:-$(dirname "$REPO_DIR")}"
 GITHUB_ACCOUNT="${GITHUB_ACCOUNT:-Rejhinald}"
 EXPECTED_REMOTE="https://github.com/Rejhinald/daily-learnings.git"
 
+# GitHub attributes a commit by the email INSIDE it, not by whoever pushed.
+# Without this the nightly commit inherits the machine's global identity and
+# lands under a different GitHub account than the one that owns the repo.
+GIT_AUTHOR_NAME_="${GIT_AUTHOR_NAME_:-Arwin Miclat}"
+GIT_AUTHOR_EMAIL_="${GIT_AUTHOR_EMAIL_:-113625337+Rejhinald@users.noreply.github.com}"
+
 LOG_DIR="$SCRIPT_DIR/logs"
 STATE_DIR="$SCRIPT_DIR/.state"
 LOCK_FILE="$STATE_DIR/run.lock"
@@ -307,10 +313,11 @@ log "Privacy scan passed." OK
 # --only with an explicit pathspec commits exactly the lesson, so anything the
 # human had already staged stays staged and unpublished. The message must come
 # before `--`, or git reads it as a pathspec.
-git commit --only -m "content: add daily learning for $TODAY" -- "$lesson_rel" >>"$LOG_FILE" 2>&1 \
+git -c "user.name=$GIT_AUTHOR_NAME_" -c "user.email=$GIT_AUTHOR_EMAIL_" \
+  commit --only -m "content: add daily learning for $TODAY" -- "$lesson_rel" >>"$LOG_FILE" 2>&1 \
   || die 7 "Commit failed."
 commit="$(git rev-parse --short HEAD)"
-log "Committed $commit" OK
+log "Committed $commit as $GIT_AUTHOR_NAME_ <$GIT_AUTHOR_EMAIL_>" OK
 
 if [ "$SKIP_PUSH" -eq 1 ]; then
   log "--skip-push set. Commit $commit is local." OK

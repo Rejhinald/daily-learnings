@@ -281,6 +281,28 @@ On a machine with a real WSL distribution the wrapper delegates to
 `automation/run-daily-learning.sh`. This machine has none (only a stopped `docker-desktop`), so it
 runs Claude natively on Windows. Force either path with `-ForceNative`.
 
+### Commit authorship
+
+GitHub decides who a commit belongs to from the **email recorded inside the commit**, not from the
+account that pushed it. `gh auth switch` only changes delivery. So the runner sets the author
+explicitly:
+
+```
+Arwin Miclat <113625337+Rejhinald@users.noreply.github.com>
+```
+
+That is Rejhinald's GitHub-verified private address, in the `ID+username@users.noreply.github.com`
+form GitHub provides so a real address never has to appear in public history. The repository also has
+this set in its **local** git config, so hand-written commits get it too without touching the global
+identity used by other repositories.
+
+Change it with `-GitAuthorName` / `-GitAuthorEmail` on the PowerShell runner, or the
+`GIT_AUTHOR_NAME_` / `GIT_AUTHOR_EMAIL_` environment variables for the shell runner.
+
+Commit messages also carry a `Co-Authored-By:` trailer for the model that drafted the lesson, which
+GitHub counts as a second contributor. Drop that line from the runner's commit message if you would
+rather it did not.
+
 ### Logs
 
 `automation/logs/daily-<timestamp>.log`, one per run. Gitignored — they contain absolute machine

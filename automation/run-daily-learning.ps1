@@ -45,7 +45,13 @@ param(
     [switch]$SkipPush,
     [switch]$ForceNative,
     [string]$WorkRepoRoot = "C:\Users\Admin\Documents\Work Repo",
-    [string]$GitHubAccount = "Rejhinald"
+    [string]$GitHubAccount = "Rejhinald",
+    # GitHub attributes a commit by the email INSIDE it, not by whoever pushed.
+    # Without this the nightly commit inherits the machine's global identity and
+    # lands under a different GitHub account than the one that owns the repo.
+    # This is Rejhinald's GitHub-verified private address.
+    [string]$GitAuthorName = "Arwin Miclat",
+    [string]$GitAuthorEmail = "113625337+Rejhinald@users.noreply.github.com"
 )
 
 Set-StrictMode -Version Latest
@@ -532,9 +538,15 @@ $(Get-Content $PromptFile -Raw)
     # the human had already staged stays staged and unpublished. Without it the
     # WARN above ("they will be left alone") would be a false guarantee.
     $message = "content: add daily learning for $today"
-    if ((Invoke-Native -File 'git' -Arguments @('commit', '--only', '-m', $message, '--', "src/content/learnings/$lessonFile")) -ne 0) {
+    $commitArgs = @(
+        '-c', "user.name=$GitAuthorName",
+        '-c', "user.email=$GitAuthorEmail",
+        'commit', '--only', '-m', $message, '--', "src/content/learnings/$lessonFile"
+    )
+    if ((Invoke-Native -File 'git' -Arguments $commitArgs) -ne 0) {
         Stop-Run 7 "Commit failed."
     }
+    Write-Log "Authored as $GitAuthorName <$GitAuthorEmail>"
     $commit = (Get-GitOutput -Directory $RepoDir -Arguments @('rev-parse', '--short', 'HEAD')).Trim()
     Write-Log "Committed $commit - $message" 'OK'
 
