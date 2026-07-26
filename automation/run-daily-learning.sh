@@ -238,9 +238,14 @@ PROMPT_TMP="$STATE_DIR/prompt-$$.md"
 
 log "Invoking Claude Code in non-interactive print mode ..."
 set +e
+# --strict-mcp-config with no --mcp-config loads ZERO MCP servers. Without it
+# the nested run inherits whatever is configured on this machine, and the
+# browser-driving ones (Playwright, three.js devtools) launch Chrome with a
+# remote-debugging port every night. A lesson writer needs no browser.
 claude --print \
     --add-dir "$WORK_REPO_ROOT" \
     --permission-mode default \
+    --strict-mcp-config \
     --allowedTools "${ALLOWED[@]}" \
     --disallowedTools "${DISALLOWED[@]}" < "$PROMPT_TMP" 2>&1 | tee -a "$LOG_FILE"
 claude_exit="${PIPESTATUS[0]}"
@@ -252,10 +257,33 @@ log "Claude exited with $claude_exit"
 log "Re-checking source repositories ..."
 snapshot_repos "$AFTER_SNAPSHOT"
 if ! diff -q "$BEFORE_SNAPSHOT" "$AFTER_SNAPSHOT" >/dev/null; then
-  diff "$BEFORE_SNAPSHOT" "$AFTER_SNAPSHOT" | tee -a "$LOG_FILE" || true
-  die 4 "A source repository changed during the run. Publishing aborted; nothing was committed."
+  # Claude has no shell and can only write inside src/content/learnings, so it
+  # cannot run git. A moved HEAD or switched branch is therefore the signature
+  # of something running git commands, and is worth aborting over. A changed
+  # working-tree hash is what happens when you edit your own code at 21:00,
+  # which is exactly when this runs -- reported loudly, but not fatal.
+  severe=0
+  while IFS=$'\t' read -r dir br head _hash; do
+    after_line="$(grep -F "$dir	" "$AFTER_SNAPSHOT" || true)"
+    [ -n "$after_line" ] || { log "TAMPERED: $dir (disappeared during the run)" FAIL; severe=1; continue; }
+    a_br="$(printf '%s' "$after_line" | cut -f2)"
+    a_head="$(printf '%s' "$after_line" | cut -f3)"
+    if [ "$br" != "$a_br" ]; then log "TAMPERED: $dir (branch $br -> $a_br)" FAIL; severe=1
+    elif [ "$head" != "$a_head" ]; then log "TAMPERED: $dir (HEAD moved - a git command ran)" FAIL; severe=1
+    else
+      a_hash="$(printf '%s' "$after_line" | cut -f4)"
+      [ "$_hash" = "$a_hash" ] || log "EDITED DURING RUN: $dir (working tree edited)" WARN
+    fi
+  done < "$BEFORE_SNAPSHOT"
+
+  [ "$severe" -eq 0 ] \
+    || die 4 "A source repository's git state moved during the run. Publishing aborted; nothing was committed."
+  [ "${STRICT_SOURCE_REPOS:-0}" != "1" ] \
+    || die 4 "A source repository's working tree changed and STRICT_SOURCE_REPOS=1. Publishing aborted."
+  log "Working-tree edits are almost certainly yours - this job cannot write outside src/content/learnings. Continuing." WARN
+else
+  log "All source repositories unchanged (tracked and untracked files)." OK
 fi
-log "All source repositories unchanged (tracked and untracked files)." OK
 
 # This repository too, BEFORE running any of its scripts. The only acceptable
 # difference is one or more new untracked lesson files.

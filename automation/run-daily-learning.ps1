@@ -44,6 +44,10 @@ param(
     [switch]$DryRun,
     [switch]$SkipPush,
     [switch]$ForceNative,
+    # Abort on ANY source-repository difference, including a working-tree edit
+    # made by you while the job was running. Off by default because that is a
+    # false alarm that costs a day's lesson.
+    [switch]$StrictSourceRepos,
     [string]$WorkRepoRoot = "C:\Users\Admin\Documents\Work Repo",
     [string]$GitHubAccount = "Rejhinald",
     # GitHub attributes a commit by the email INSIDE it, not by whoever pushed.
@@ -250,28 +254,43 @@ function New-GitDigest {
     return $OutFile
 }
 
+<#
+ Compares two snapshots and classifies what moved.
+
+ The distinction matters. Claude has no shell and its writes are scoped to
+ src/content/learnings, so it *cannot* run git or edit a source repository. A
+ moved HEAD or a switched branch is therefore the signature of something running
+ git commands - genuinely alarming, and worth aborting over.
+
+ A working-tree change is different: it is what happens when the human is
+ editing their own code at 21:00, which is exactly when this job runs. Treating
+ that as tampering threw away a finished lesson because a portfolio file was
+ saved mid-run. It is reported loudly and does not block.
+
+ -StrictSourceRepos restores the old behaviour of aborting on any difference.
+#>
 function Compare-SourceRepoSnapshot {
     param([hashtable]$Before, [hashtable]$After)
-    $changed = New-Object System.Collections.Generic.List[string]
+
+    $severe = New-Object System.Collections.Generic.List[string]
+    $benign = New-Object System.Collections.Generic.List[string]
 
     foreach ($key in $Before.Keys) {
         if (-not $After.ContainsKey($key)) {
-            $changed.Add("$key (disappeared during the run)")
+            $severe.Add("$key (disappeared during the run)")
             continue
         }
         $b = $Before[$key]; $a = $After[$key]
-        if ($b.Branch -ne $a.Branch) { $changed.Add("$key (branch $($b.Branch) -> $($a.Branch))") }
-        elseif ($b.Head -ne $a.Head) { $changed.Add("$key (HEAD moved)") }
-        elseif ($b.Porcelain -ne $a.Porcelain) { $changed.Add("$key (working tree changed)") }
+        if ($b.Branch -ne $a.Branch) { $severe.Add("$key (branch $($b.Branch) -> $($a.Branch))") }
+        elseif ($b.Head -ne $a.Head) { $severe.Add("$key (HEAD moved - a git command ran)") }
+        elseif ($b.Porcelain -ne $a.Porcelain) { $benign.Add("$key (working tree edited)") }
     }
 
-    # Symmetric: a repository that appeared during the run is just as much a
-    # sign that something wrote where it should not have.
     foreach ($key in $After.Keys) {
-        if (-not $Before.ContainsKey($key)) { $changed.Add("$key (appeared during the run)") }
+        if (-not $Before.ContainsKey($key)) { $severe.Add("$key (appeared during the run)") }
     }
 
-    return $changed
+    return [PSCustomObject]@{ Severe = @($severe); Benign = @($benign) }
 }
 
 # ---------------------------------------------------------------- start
@@ -431,10 +450,15 @@ $(Get-Content $PromptFile -Raw)
 "@
 
     Write-Log "Invoking Claude Code in non-interactive print mode ..."
+    # --strict-mcp-config with no --mcp-config loads ZERO MCP servers. Without
+    # it the nested run inherits whatever is configured on this machine, and the
+    # browser-driving ones (Playwright, three.js devtools) launch Chrome with a
+    # remote-debugging port every night. A lesson writer needs no browser.
     $claudeArgs = @(
         '--print',
         '--add-dir', $WorkRepoRoot,
         '--permission-mode', 'default',
+        '--strict-mcp-config',
         '--allowedTools'
     ) + $allowed + @('--disallowedTools') + $disallowed
 
@@ -465,12 +489,22 @@ $(Get-Content $PromptFile -Raw)
     # empty result arrives as $null and `.Count` throws under Set-StrictMode -
     # which meant this gate crashed on the healthy path (nothing changed) while
     # a real modification would have sailed through.
-    $changed = @(Compare-SourceRepoSnapshot -Before $before -After $after)
-    if ($changed.Count -gt 0) {
-        foreach ($entry in $changed) { Write-Log "MODIFIED: $entry" 'FAIL' }
-        Stop-Run 4 "A source repository changed during the run. Publishing aborted; nothing was committed."
+    $verdict = Compare-SourceRepoSnapshot -Before $before -After $after
+
+    if ($verdict.Severe.Count -gt 0) {
+        foreach ($entry in $verdict.Severe) { Write-Log "TAMPERED: $entry" 'FAIL' }
+        Stop-Run 4 "A source repository's git state moved during the run. Publishing aborted; nothing was committed."
     }
-    Write-Log "All $($after.Count) source repositor(ies) unchanged (tracked and untracked files)." 'OK'
+
+    if ($verdict.Benign.Count -gt 0) {
+        foreach ($entry in $verdict.Benign) { Write-Log "EDITED DURING RUN: $entry" 'WARN' }
+        if ($StrictSourceRepos) {
+            Stop-Run 4 "A source repository's working tree changed and -StrictSourceRepos is set. Publishing aborted."
+        }
+        Write-Log "Working-tree edits are almost certainly yours - this job cannot write outside src/content/learnings. Continuing." 'WARN'
+    } else {
+        Write-Log "All $($after.Count) source repositor(ies) unchanged (tracked and untracked files)." 'OK'
+    }
 
     # 8b. Verify this repository too, BEFORE running any of its scripts. The
     #     only acceptable difference is one or more new untracked lesson files.
