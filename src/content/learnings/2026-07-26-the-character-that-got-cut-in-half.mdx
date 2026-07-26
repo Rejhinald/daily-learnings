@@ -1,0 +1,197 @@
+---
+title: "The Character That Got Cut in Half"
+slug: "the-character-that-got-cut-in-half"
+publishedAt: "2026-07-26"
+summary: "A new-lead alert comes through and the preview ends in a little broken box where an emoji should be. The gateway looks fine, the encoding looks fine, the code typechecks. The real cause is that a string's length counts something you cannot see, so a slice cut one character clean in half."
+sourceProject: "Internal lead-notification service"
+language: "TypeScript"
+difficulty: "intermediate"
+estimatedMinutes: 7
+topics:
+  - "JavaScript"
+  - "Unicode"
+  - "Strings"
+  - "Text handling"
+  - "Internationalization"
+  - "Input validation"
+concepts:
+  - "Code units vs characters"
+  - "String length in JavaScript"
+  - "Grapheme clusters"
+  - "Intl.Segmenter"
+  - "Safe truncation"
+originKind: "recent-change"
+sequence: 3
+sourceFingerprint: "c4e9a1f70b6d2358ae0f9c41"
+relatedSlugs:
+  - "parse-at-the-trust-boundary-instead-of-casting"
+---
+
+<InBrief principle="A string's length counts code units you can't see, so never cut one at a raw number — cut it where a whole character ends.">
+
+When you shorten a string with `slice(0, 80)`, you are trusting that 80 means eighty characters. It doesn't. JavaScript measures length in fixed-size storage slots called code units, and most emoji — plus many non-English characters — take two slots each. So the cut can land in the middle of a single character and split it in half.
+
+Half a character is not a character. Nothing crashes; it renders as a broken box (�), quietly corrupts JSON or a database write, and throws off every "under N characters" count you based on `.length`. And it only misfires when a two-slot character straddles the cut, so it hides for months and then breaks on one unlucky message.
+
+The fix is to measure with the same ruler your reader uses: count and cut by whole visible characters — graphemes — with `Intl.Segmenter`, so a cut can only ever fall between characters, never through one.
+
+</InBrief>
+
+## The box at the end of the message
+
+It's a little after nine on a Tuesday. A notification lands on the front desk's phone — a new lead just came in through the website, and the alert carries a short preview of what the person wrote.
+
+You glance at it:
+
+> New lead — "Looking to add a rental unit above the garage �"
+
+That last character. A little box, or a diamond with a question mark inside it, sitting where a word should be. You've seen it before, on other people's screens, in other people's bugs. `�`. The universal sign that *something went wrong with text.*
+
+Your first instinct is the obvious one: the notification service mangled it. Some encoding setting on the message gateway, some header claiming the wrong charset. So you open the raw message in the database, exactly as the customer typed it.
+
+It's fine. It ends in a little house emoji — 🏡 — perfectly intact. Whatever chewed it up happened *after* the customer and *before* the phone. Somewhere in your own code.
+
+## Nobody touched the encoding
+
+The code that builds that preview does one small thing: it takes the customer's message — which arrives as part of the <Term>request body</Term> — and shortens it so the alert isn't a wall of text. One line, the kind you've written a hundred times:
+
+```ts
+const preview = message.slice(0, 80) + "…";
+```
+
+Take the first 80, add an ellipsis, done. It reviewed clean. It ran clean for months.
+
+Here is what actually happened. The customer's message was longer than 80, and the house emoji happened to sit right at the 80 mark. The slice kept the *first half* of that emoji and threw the second half away. What reached the phone was not a house and not nothing — it was half a character, which no font can draw, so it came out as that broken box.
+
+Nothing was mis-encoded. The slice did exactly what you asked. You just asked it to cut at a spot that was never a legal place to cut.
+
+## Why it only broke sometimes
+
+The reason this survived so long — and the reason it misfires only *sometimes* — is that a string's length is not measured in the thing you think it is.
+
+When you write `message.length` and get 80 back, it is tempting to read that as "eighty characters." It isn't. JavaScript stores text as a run of small fixed-size units — call them slots — and `.length` counts *slots,* not characters. For plain English, one letter fills one slot, so the two numbers agree and you never notice there is a difference. The word "garage" is six letters and its length is six. Everything lines up.
+
+Emoji don't fit in one slot. A house emoji, a great many symbols, plenty of non-Latin characters — each one takes *two* slots. So the length of a lone house emoji is 2, even though your eye sees a single character. And `slice(0, 80)` does not cut after eighty characters; it cuts after eighty *slots.* If a two-slot character straddles that line — one slot on each side — the cut runs straight through the middle of it.
+
+That is why it is intermittent. Most messages truncate cleanly, because the cut lands between two whole characters by luck. The bug only surfaces on the one <Term>edge case</Term> nobody pictured: a two-slot character unlucky enough to sit exactly on the boundary. Ship it on a Monday and it looks perfect; the one lead on Thursday who ended their sentence with an emoji gets the broken box. No crash, no error in the logs, no alert — a <Term>silent failure</Term> with a face.
+
+The slots have a real name, by the way: they are *code units,* and JavaScript's flavour of them is called UTF-16. A character that needs two of them is stored as a pair, and slicing between the halves of that pair is what leaves you holding one lonely, meaningless half.
+
+## Two rulers over the same ribbon
+
+Picture the message as a long paper ribbon with the text printed along it. Now lay two rulers against it.
+
+The top ruler is yours. Its ticks are *characters* — the things your eye counts. One tick per letter, one tick per emoji.
+
+The bottom ruler is the computer's. Its ticks are *code units* — the fixed-size slots it actually stores. For a letter, its tick sits right under yours. For an emoji, it spends two ticks where you spent one.
+
+As long as the ribbon is plain English, the two rulers stay in lockstep, tick for tick, and you can happily forget there are two of them. That is the trap. For months your ruler and the computer's ruler agree, so "cut at 80" means the same place to both of you.
+
+Then an emoji slides onto the ribbon, and from that point on the rulers drift apart — the computer's is now one tick ahead. You say "cut at 80," meaning eighty of *your* ticks. The blade drops at eighty of the *computer's* ticks. And if that spot falls inside the two-tick span of a single emoji, the blade comes down through the middle of a character that was never meant to be divided.
+
+The fix is not to sharpen the blade. It is to stop measuring with the wrong ruler.
+
+## The fixes you'll reach for first
+
+Every one of these is something a careful developer actually reaches for. Here is where each runs out.
+
+**"Just delete anything that isn't a plain letter before you cut."** Run the message through a filter that strips out emoji and accents, and the broken box can't happen, because there is nothing two slots wide left to split. It works — and it quietly vandalises real data. The customer who signed off with an emoji, the name with an accent in it, the message that wasn't in English: you have now mangled all of it to dodge a slicing bug. You didn't fix the cut. You burned down the thing you were cutting.
+
+**"It's one stray box at the end — that's cosmetic. Ship it."** Sometimes it is. Often it isn't. A half-character is a broken value, and broken values don't stay put. Try to store it in a database column with a strict character set and the write can fail; encode it as <Term of="json">JSON</Term> to hand off somewhere and it can corrupt the whole field. And the very same miscount that split the emoji is wrong everywhere else too — the <Term>validation</Term> that swears a message is "under 280 characters" is really counting slots, so it rejects perfectly short messages full of emoji and waves through longer plain ones.
+
+**"Use the spread — `[...message]` — instead of `slice`."** Now you're close. Spreading a string walks it by *code point* rather than by slot, so a two-slot emoji comes through as a single item and stops getting split. For the house-emoji case, this genuinely fixes it. Where it runs out is the characters built from *several* code points glued together: a flag, an emoji carrying a skin tone, a family emoji, or a plain letter whose accent is stored as a separate mark. Your eye sees one character; the spread sees three or four, and can still cut between them. A better ruler — still not the one your reader is holding.
+
+## Cutting where a character actually ends
+
+The tool that measures with *your* ruler — the one that counts what a human sees as one character — is `Intl.Segmenter`. Hand it a string and it gives the text back in grapheme clusters: whole characters, with their emoji, accents and flags kept intact, each one indivisible.
+
+```ts
+// Trim a string to at most `max` visible characters, without splitting one.
+function preview(text: string, max = 80): string {
+  const clean = text.trim();
+
+  // Count what a human sees — graphemes — not UTF-16 code units.
+  const segmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
+  const characters = [...segmenter.segment(clean)].map((piece) => piece.segment);
+  if (characters.length <= max) return clean;
+
+  // Keep whole characters only, then back up to the last complete word.
+  let kept = characters.slice(0, max).join("");
+  const lastSpace = kept.lastIndexOf(" ");
+  if (lastSpace > max * 0.6) kept = kept.slice(0, lastSpace);
+
+  return kept.replace(/[\s,.;:]+$/u, "") + "…";
+}
+```
+
+<Callout type="insight" title="No library required">
+
+`Intl.Segmenter` is built into modern JavaScript — recent browsers and Node all ship it — so this is one less <Term>dependency</Term> to add, not a package to install. It also takes a locale, because where one "character" ends is genuinely a language question in some scripts.
+
+</Callout>
+
+## Reading it, block by block
+
+**The one line that saves you** is `const characters = [...segmenter.segment(clean)]...`. From here on you are working with an array of *whole* characters. Everything downstream slices that array, so the cut can only ever fall *between* two characters — never through the middle of one. The broken box is now impossible, not merely unlikely.
+
+**The length check is honest now.** `characters.length` is the count your reader would get by pointing at the screen and counting, so `characters.length <= max` finally means what it says. The same array is what you would hand to a real "under 280 characters" rule.
+
+**Backing up to the last whole word** is the polish. Once you have `max` characters, `lastIndexOf(" ")` finds the previous space and trims back to it, so the preview ends on a complete word instead of mid-syllable. The `max * 0.6` guard is there so a single very long word — one with no space to retreat to — doesn't collapse the preview to almost nothing; below that threshold, you keep the hard cut. Slicing at a space is always safe, because a space is a one-slot character and can never be half of a pair.
+
+## What the two cuts look like
+
+```
+        "…deck with a firepit 🏡" , trim to fit
+                        │
+          ┌─────────────┴──────────────┐
+     slice by index              segment by grapheme
+   (counts code units)          (counts characters)
+          │                             │
+   cut can split the emoji       emoji stays whole
+          │                             │
+   "…deck with a firepit �"      "…deck with a firepit"
+   a broken box ships            a clean preview ships
+```
+
+Notice that both paths ran the *same* request through the *same* limit. The only difference is the unit each one counted in — and that single choice decided whether a customer's message reached the desk readable or wrecked.
+
+## Where this bites in real life
+
+**A length check that counts the wrong thing.** A form swears every message is "under 280 characters" using `message.length`. Someone writes 200 visible characters, half of them emoji, and gets turned away for being too long — because `.length` counted far more slots than that. Meanwhile a longer plain-text message sails through. Your front-end counter, your server-side truncation, and your database column can all disagree about the length of the exact same string.
+
+**Taking the first character for an initial or an avatar.** `name[0]` looks harmless until the name begins with an emoji or a two-slot character — then `name[0]` is half of it, and the avatar shows a broken box instead of a letter.
+
+**Reversing or chunking a string by index.** Any code that walks a string slot by slot — reversing it, splitting it into fixed-size pieces, building an id from a slice — can guillotine a two-slot character at every boundary. It passes every test, because the test strings were all plain English, and plain English is exactly the case where the bug hides.
+
+## Try this tonight
+
+Open a scratch file and paste this — nothing else needed, ten minutes:
+
+```ts
+const msg = "hi 🏡";
+
+console.log(msg.length);                                    // A
+console.log([...msg].length);                               // B
+console.log(
+  [...new Intl.Segmenter().segment(msg)].length,            // C
+);
+console.log(msg.slice(0, 4));                               // D
+```
+
+Before you run it, predict all four. How many slots does the message hold (A)? How many characters does the spread see (B)? How many does the segmenter see (C)? And in D, you are slicing off the last slot of that two-slot emoji — so what shows up: the house, nothing, or something in between? Write your four guesses down, *then* run it. The gap between A and the two below it is the whole lesson, sitting in your terminal.
+
+<Quiz>
+  <Question q="You call the length property on a string that looks like twenty characters to you, and it returns twenty-two. What is it actually counting?">
+    Code units — the fixed-size UTF-16 slots JavaScript stores text in. Most letters take one slot, but emoji and many non-Latin characters take two, so the count runs ahead of the number of characters your eye sees. `.length` has never counted characters; it counts slots, and for plain English the two happen to match.
+  </Question>
+  <Question q="Why does slicing a string by index sometimes leave a broken box character at the end?">
+    Because the index counts slots, not characters, so the cut can land in the middle of a two-slot character. You keep one half and drop the other, and half a character is a meaningless value that no font can draw — it renders as `�`. It only happens when a two-slot character straddles the exact cut point, which is why it looks intermittent.
+  </Question>
+  <Question q="The spread syntax fixes the plain-emoji case but not every character. What can it still split, and what handles those correctly?">
+    Grapheme clusters — characters built from several code points glued together, like a flag, an emoji with a skin tone, a family emoji, or a letter whose accent is stored as a separate mark. The spread walks by code point, so it can still cut between the pieces. `Intl.Segmenter` with grapheme granularity treats each cluster as one indivisible unit, which is the ruler your reader actually uses.
+  </Question>
+</Quiz>
+
+<Takeaway>
+A string's length is counted in code units you can't see, not the characters you can — so never cut one at a raw number. Measure and slice by whole characters, with `Intl.Segmenter`, and the cut can only ever fall between characters, never through one.
+</Takeaway>
