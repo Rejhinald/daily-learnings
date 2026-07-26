@@ -445,26 +445,46 @@
 .dl-term-panel {
   position: absolute;
   bottom: calc(100% + 0.5rem);
-  left: 0;
+  /* Centred on the term rather than left-aligned, so a term near the right of
+     the column cannot push the panel past the edge of the page. */
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 30;
-  display: block;
   width: max-content;
-  max-width: min(22rem, calc(100vw - 2.5rem));
+  max-width: min(20rem, calc(100vw - 2rem));
   white-space: normal;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-inner);
   background-color: var(--surface-card);
   box-shadow: var(--shadow-raised);
   padding: 0.7rem 0.85rem;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 120ms ease;
+  /*
+   * `display: none`, not `visibility: hidden`. A hidden-but-present absolute
+   * element still contributes to the document's scrollable width, and with one
+   * panel per glossary term that added a horizontal scrollbar to every lesson.
+   */
+  display: none;
 }
 
 .dl-term:hover .dl-term-panel,
 .dl-term:focus-within .dl-term-panel {
-  opacity: 1;
-  visibility: visible;
+  display: block;
+}
+
+/*
+ * On a phone there is not enough room either side of a word to centre a panel
+ * on it without clipping, so the definition pins to the bottom of the screen
+ * instead. That also puts it clear of the thumb that just tapped the word.
+ */
+@media (max-width: 40rem) {
+  .dl-term-panel {
+    position: fixed;
+    inset: auto 1rem 1rem 1rem;
+    transform: none;
+    width: auto;
+    max-width: none;
+    z-index: 50;
+  }
 }
 
 .dl-term-head {

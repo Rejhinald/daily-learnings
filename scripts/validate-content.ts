@@ -161,6 +161,17 @@ function main(): number {
       }
     }
 
+    // Inline code that names a glossary term is wrapped automatically, so
+    // wrapping it by hand too nests a <button> inside a <button> — invalid
+    // HTML that breaks hydration at runtime rather than at build time.
+    const redundant = /<Term\b[^>]*>\s*`[^`]+`\s*<\/Term>/g;
+    for (const match of learning.body.matchAll(redundant)) {
+      console.error(
+        `  ✗ ${file}: remove the <Term> around ${match[0].replace(/<[^>]+>/g, "")} — inline code is linked to the glossary automatically, and wrapping it twice nests a button inside a button`,
+      );
+      failed = true;
+    }
+
     const findings = scanText(fs.readFileSync(fullPath, "utf8"), { extraTerms });
     if (findings.length > 0) {
       reportFindings(file, findings);

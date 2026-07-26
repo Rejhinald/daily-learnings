@@ -2,7 +2,7 @@
 title: "Your Types Disappear When the Code Runs"
 slug: "parse-at-the-trust-boundary-instead-of-casting"
 publishedAt: "2026-07-25"
-summary: "TypeScript checks the code you write. It does not check the data that shows up. Once you see why those are two completely different things, a whole category of silent bugs stops being mysterious."
+summary: "A quote comes back blank. Nothing crashed, nothing logged, and the code typechecks perfectly. The reason is that TypeScript was never watching the part you thought it was watching."
 sourceProject: "Internal quoting and estimation web app"
 language: "TypeScript"
 difficulty: "beginner"
@@ -22,133 +22,145 @@ concepts:
 originKind: "recent-change"
 sequence: 1
 sourceFingerprint: "5a7ab6bbd6edd7e419e8d945"
-relatedSlugs: []
+relatedSlugs:
+  - "which-way-does-your-guard-fail"
 ---
 
-## The bug that doesn't look like a bug
+<InBrief principle="A type is a promise you make to the compiler. A check is a promise the data makes to you.">
 
-Here's a situation worth sitting with for a second, because it's the reason this lesson exists.
+TypeScript checks the code you *write*. Nothing checks the data that *arrives*. Every type is
+deleted before your program runs, so labelling a request body does not inspect it — it just makes
+everyone downstream believe you did.
 
-You have an <Term>endpoint</Term> that calculates a price. Someone sends it a request. It replies
-<Term of="200 ok">200 OK</Term> — the success code. No error in the logs. No alert. Nothing crashed.
+When the data turns out to be a different shape, JavaScript usually will not crash. It produces
+`NaN` or `undefined`, keeps going, and returns a confident, wrong answer with a success code.
 
-And the price it returned is `null`.
+The fix is to stop *claiming* and start *asking*. Run a real check on the data at the moment it
+enters your program, and let that check hand you back the value. Then everything after it is
+allowed to trust its inputs.
 
-Not "wrong by a bit". Not a crash you can go and look at. Just quietly, confidently wrong. The
-endpoint did its job as far as it knows. Your editor showed no red squiggles when you wrote it, and
-TypeScript compiled it without a word of complaint.
+</InBrief>
 
-So what happened?
+## The quote that came back empty
 
-## The one idea
+It's a Tuesday. Someone in sales messages you: a customer generated a quote and the total showed up
+blank. Not zero. Blank.
 
-Think of a <Term of="type annotation">TypeScript type</Term> as a **label you write on a box**.
+You open the logs, expecting red. There's nothing. No error, no stack trace, no alert. You find the
+request. Status `200` — the code that means *everything went fine*. The response body is sitting
+right there:
 
-The labels are genuinely useful. While you're packing and moving boxes around, they tell you what's
-supposed to be inside each one, and your editor uses them to stop you putting a lamp in the box
-marked "books".
+```json
+{ "total": null }
+```
 
-But here's the part that changes how you see everything else: **when your code actually runs, the
-labels are gone.** TypeScript <Term of="compile">compiles</Term> down to plain JavaScript, and that
-step peels every label off and throws them away. The boxes still move around. Nothing is checking
-their contents anymore. (The formal name for this is
-<Term of="type erasure">type erasure</Term>, and it is not a flaw — it is what keeps types free at
-<Term>runtime</Term>.)
+So you read the handler. It's eleven lines. It takes the request, pulls out the square footage and
+the tier, multiplies by a rate, sends the number back. You wrote it. It typechecks. Your editor is
+completely calm about it — no red squiggles, no warnings, nothing to click.
 
-For boxes that never leave your house, that's fine — you packed them, you know what's in them.
+And it is confidently returning nothing.
 
-The trouble starts with a box that arrives **from outside**: a <Term of="request body">request from
-a browser</Term>, a webhook from another company, a <Term of="json">JSON</Term> file you saved last
-month, a response from an API. You didn't pack that one. Writing a label on it doesn't change what's
-inside. It just makes you, and everyone reading your code afterwards, *believe* something you never
-actually checked.
+This is the moment worth slowing down for, because the instinct is to hunt for a typo, and there
+isn't one. The code is doing exactly what it says. The problem is what it *assumed*.
 
-## Why it usually doesn't crash
+## What was actually in the box
 
-This is the part that catches people out, so it's worth being precise about.
+Here's the picture I keep coming back to.
 
-You might reasonably think: fine, if the data is wrong, the code will explode and I'll see it in the
-logs. Usually it won't. JavaScript is extremely reluctant to stop.
+A <Term of="type annotation">TypeScript type</Term> is a **label you write on a box**. It's genuinely
+useful. While you're packing boxes and carrying them around your own house, the labels tell you and
+everyone helping what's supposed to be inside. Your editor reads the labels and stops you putting a
+lamp in the one marked *books*.
 
-Multiply a number by something that isn't there and you don't get an error, you get
-<Term of="nan">NaN</Term> — a special value meaning "not a number". Keep going and it spreads through
-every calculation it touches. Then, when the result is turned into JSON to send back, `NaN` isn't a
-thing JSON can express, so it silently becomes `null`.
+Then the code ships. And here's the part nobody tells you at the start: **when your program actually
+runs, the labels are gone.**
 
-At no point did anything go wrong loudly. That is a <Term of="silent failure">silent failure</Term>,
-and it is why this class of bug can live in production for months: **there is nothing to notice.**
+TypeScript <Term of="compile">compiles</Term> to plain JavaScript, and that step peels every label
+off and bins them. The boxes still move around. Nothing is reading them anymore. (The proper name for
+this is <Term of="type erasure">type erasure</Term>, and it isn't a flaw — it's the deal that makes
+types cost nothing at <Term>runtime</Term>.)
 
-## The mental model
+For boxes that never leave your house, fine. You packed them.
 
-Picture a building with an access policy.
+But that quote request didn't come from your house. It came over the network, from a browser you
+don't control, possibly running a version of your app from three months ago. You didn't pack that
+box. And writing *square footage: number* on the side of it changed nothing at all about what was
+inside.
 
-The **policy** is a document. It says who's allowed in the server room, and it's precise and
-genuinely valuable. Everyone writing it takes it seriously. But it is a document. It cannot
-physically stop anyone from walking through the door.
+Somewhere out there, a client sent `squareFeet` as the text `"1200"` instead of the number `1200`.
+The label still said number. Everyone believed it.
 
-The **turnstile** is the thing at the entrance that actually reads your badge. It's the only part of
-the building that can say "you're not on the list."
+## Why nobody's pager went off
 
-TypeScript is the policy. A check that runs when your code runs is the turnstile.
+You'd expect that to explode. It's the reasonable expectation, and it's wrong, and understanding
+*why* it's wrong is most of this lesson.
 
-And now the bit worth remembering: **the policy is shredded at the door.** It governs the code you
-*write*. The turnstile governs the data that *arrives*. If you never install a turnstile, the policy
-is fiction — and a well-written fiction is more dangerous than an obvious one, because everyone
-downstream trusts it completely.
+JavaScript is extraordinarily reluctant to stop. Ask it to multiply something by a value that isn't
+there and it doesn't raise its hand. It hands you `NaN` — three letters meaning *not a number* —
+and carries on as if nothing happened. `NaN` then spreads. Anything you multiply, add, or divide it
+into becomes `NaN` too. It moves through the calculation like a rumour.
 
-The door itself has a name worth knowing: a <Term>trust boundary</Term>. It is any point where data
-you control meets data you don't.
+Then the result gets turned into <Term>JSON</Term> to send back. And JSON has no way to write `NaN`.
+So it quietly becomes `null`.
 
-## Why not just...?
+Follow that chain again, because every link is boring on its own and the combination is what got
+you: wrong type in → no error → `NaN` → serialised to `null` → sent with a `200`.
 
-Every alternative here is reasonable-sounding. Working through why each one loses is, I think, the
-fastest way to actually own this idea.
+That's a <Term of="silent failure">silent failure</Term>. Not a crash you can find. An answer that
+looks exactly like a correct answer. It can sit in production for months, and the only reason you
+found this one is that a human happened to look at a blank field and say something.
 
-### ...trust it, since I wrote both sides?
+## The building and the door
 
-You wrote the app that sends the request *and* the endpoint that receives it, so the shape is
-guaranteed. Right?
+The mental model I'd like you to keep is a building with an access policy.
 
-It's guaranteed *today*. It stops being guaranteed the moment anything drifts: someone's phone is
-running a three-month-old build of your app, a <Term>serializer</Term> starts sending a number as a
-string, a retry replays an old payload. "Both sides" isn't one thing you control — it's two things
-that happen to agree right now.
+The **policy** is a document. It says who's allowed in the server room. It's precise, it's taken
+seriously, everyone who writes it means it. But it is a document. It has never once physically
+stopped anybody from walking through a door.
 
-### ...just check a couple of fields with an `if`?
+The **turnstile** is the thing at the entrance that reads your badge. It's the only part of the
+building capable of saying *you are not on the list*.
 
-This is real validation, and honestly it's fine for one or two fields. It stops scaling for two
-reasons.
+TypeScript is the policy. A check that runs at runtime is the turnstile.
 
-First, it usually checks the wrong thing. `if (!body.tier)` asks *"is something there?"* — but the
-bug you'll actually hit is someone sending `"delux"` instead of `"deluxe"`. Something *is* there. It
-passes. It's just not one of the values you support.
+And the thing to hold onto: **the policy is shredded at the door.** It governs the code you *write*.
+The turnstile governs the data that *arrives*. If you never install a turnstile, the policy is
+fiction — and a well-written fiction is more dangerous than an obvious one, because everybody
+downstream reads it and relaxes.
 
-Second, you now have two separate things describing one shape: the type you wrote down, and the
-checks that run. Only one of them executes. Add a field to the type and the checks quietly stop
-covering everything, and nothing tells you.
+The door has a name, by the way. It's the <Term>trust boundary</Term>: any point where data you
+control meets data you don't.
 
-### ...just use `any` and stop worrying about it?
+## The four things you'll want to try first
 
-<Term of="any">`any`</Term> is TypeScript's "stop checking this" switch. It solves the friction
-instantly, and that's the problem: it doesn't stay put. Anything touched by an `any` value also
-stops being checked, and it spreads outward from there. You don't lose type safety at one line, you
-lose it along a path.
+Every one of these is reasonable. I've reached for all of them. Here's where each one runs out.
 
-### ...let it crash and fix it then?
+**"I wrote both sides, so the shape is guaranteed."** It's guaranteed *today*. It stops being
+guaranteed the moment anything drifts — a phone running an old build of your app, a
+<Term>serializer</Term> that starts sending numbers as strings, a retry replaying a stale payload.
+"Both sides" was never one thing you control. It's two things that currently agree.
 
-That's a genuinely fine strategy — for bugs that crash. This one returns `200 OK`.
+**"I'll just check a couple of fields with an `if`."** Honestly fine for one or two fields. It fails
+for a subtle reason: it usually checks the wrong thing. `if (!body.tier)` asks *is something there?*
+The bug you'll actually hit is someone sending `"delux"` instead of `"deluxe"`. Something **is**
+there. It sails through. It's just not a tier you sell.
 
-## What to do instead
+**"I'll use `any` and stop fighting it."** That's the *stop checking this* switch, and it works
+instantly, which is the trap. It doesn't stay where you put it. Everything an `any` value touches
+also stops being checked, and it spreads outward from there. You don't lose safety on one line. You
+lose it along a path, quietly.
 
-Instead of *claiming* what the data is, **check it, and let the check hand you back the data**. If
-the check passes, you have something you actually know the shape of. If it fails, you find out
-immediately, at the door, where you can still do something about it.
+**"If it's wrong it'll crash and I'll fix it then."** Genuinely a fine strategy — for bugs that
+crash. Re-read the top of this lesson. This one returned `200`.
 
-That move has a name — <Term>parse</Term>, as opposed to merely asserting — and the description you
-check against is called a <Term>schema</Term>.
+## Installing the turnstile
 
-The library below is Zod, but the idea has nothing to do with Zod specifically — you could write
-this by hand. Don't worry about memorising the syntax; follow the shape of it.
+So: stop claiming, start asking. Describe the shape you need as something that *exists at runtime and
+can actually look at a value*, then let it hand the value back to you.
+
+That move is called <Term>parse</Term>, and the description you check against is a
+<Term>schema</Term>. The library below is Zod. Don't worry about memorising it — you could write this
+by hand. Follow the shape.
 
 ```ts
 import { z } from "zod";
@@ -182,33 +194,33 @@ export async function priceQuote(req: Request) {
 }
 ```
 
-## Reading that, block by block
+## Walking through it
 
-**The description at the top.** `QuoteInput` describes the shape once: an id that isn't empty, a
-size that's a whole positive number, and a tier that must be one of exactly two words. Notice it's
-written as a *value* — something that exists when the code runs and can actually inspect things —
-rather than as a type annotation that evaporates.
+**The description, up top.** `QuoteInput` writes the shape down once — an id that isn't empty, a size
+that's a whole positive number, a tier that's one of exactly two words. The important thing is that
+it's a *value*, not an annotation. It exists when the program runs. It can be handed a thing and
+asked about it.
 
-**The line that says `type QuoteInput = z.infer<...>`.** This asks the description to also hand you
-a TypeScript type. It matters because it means you only wrote the shape *once*. The thing that
-checks and the thing that describes can't drift apart, because they're the same thing.
+**That odd double line.** `type QuoteInput = z.infer<typeof QuoteInput>` asks the description to
+also produce a TypeScript type. It looks redundant and it's the opposite: it means the shape is
+written down *once*. The thing that checks and the thing that describes can never drift apart,
+because they're the same object.
 
-**The unsafe version.** One line does the damage: `as QuoteInput`. That's a
-<Term of="type assertion">type assertion</Term> — you telling the compiler "trust me, it's this
-shape". It generates no code whatsoever; at runtime that line may as well not exist. The compiler
-now believes `squareFeet` is a number and is simply wrong. Send it a misspelled tier and you get the
-silent `null` from earlier.
+**The unsafe version — one line of damage.** `as QuoteInput` is you leaning over to the compiler and
+saying *trust me*. That's a <Term of="type assertion">type assertion</Term>. It emits no code at all;
+at runtime the line may as well be a comment. From there the compiler is certain `squareFeet` is a
+number, and it's wrong, and it will never find out.
 
-**The safe version, in three moves.** Read the body into a variable labelled
-<Term of="unknown">`unknown`</Term>, which is TypeScript's way of saying "I genuinely don't know yet,
-and I won't let you use this until you find out". Run the check. If it failed, stop right there and
-reply <Term of="400">400</Term> — *your request was malformed* — along with the specific list of
-what was wrong. Everything after that point is code that is finally allowed to trust its inputs.
+**The safe version — three moves.** Read the body into a variable labelled
+`unknown`, TypeScript's way of saying *I don't know what this is and I won't let you use it until
+you find out*. Run the check. If it failed, stop right there and answer `400` — *your request was
+malformed* — with the list of exactly what was wrong.
 
-The business logic at the bottom is identical in both versions. The only difference is whether the
-assumptions it makes happen to be true.
+Notice what that early return buys you. Every line after it is code that has *earned* the right to
+trust its inputs. The arithmetic at the bottom is identical in both versions. The only difference is
+whether its assumptions happen to be true.
 
-## What the two paths actually look like
+## The two paths, side by side
 
 ```
               data arrives from outside
@@ -228,57 +240,55 @@ assumptions it makes happen to be true.
    200 OK, wrong answer
 ```
 
-The thing to notice: the left path has **no fork in it**. There is nowhere in it where bad data
-*could* be caught. That's not a missing check you forgot to add — the shape of the code makes
-catching it impossible.
+Look at the left path for a second. It has **no fork in it.** There's nowhere in it where bad data
+*could* be spotted. That's not a check somebody forgot to write — the shape of the code makes
+spotting it impossible. That's why the bug came out as a blank field instead of an exception.
 
-## Where this goes wrong in practice
+## Where this bites in real life
 
-**Writing a type on something you read from disk or the network.** `const settings: Settings =
-JSON.parse(raw)` looks like it's checking something. It isn't. `JSON.parse` returns "could be
-anything", and "could be anything" is allowed to become any type without complaint.
+**Putting a type on something you read from disk or the network.** `const settings: Settings =
+JSON.parse(raw)` looks like it's checking. It isn't. `JSON.parse` returns *could be anything*, and
+*could be anything* is allowed to become any type at all without a murmur.
 
-**Throwing on bad input.** Most check libraries offer a version that throws. In a request handler
-that turns a caller's typo into a <Term of="500">500</Term> — a status that says *your server broke*
-— when the honest answer was a 400. Reach for the version that returns a result you can branch on.
+**Checking in the wrong place, repeatedly.** People tend to add checks deep inside, wherever the last
+bug surfaced. Then every new caller is a fresh hole. Check once, at the door. One turnstile at the
+entrance beats a guard in every room, and it's less code.
 
-**Checking in the wrong place, over and over.** People often add checks deep inside, wherever the
-last bug happened to surface. Then every new caller is a new hole. Check once, at the door where the
-data enters, and let everything inside trust it. One turnstile at the entrance beats a guard in
-every room.
+**Using the throwing version inside a handler.** Most check libraries offer one that throws on bad
+input. In a request handler that turns a caller's typo into a <Term of="500">500</Term> — a status
+that means *my server is broken* — when the honest answer was a 400. Use the version that returns a
+result you can branch on.
 
-**Assuming the failure will be loud.** Worth saying twice, because it's the whole point: a crash is
-a *good* outcome. It tells you. The bug in this lesson doesn't crash — it answers confidently and
-incorrectly, and that's much harder to find.
+## Try this tonight
 
-## Try this
+Ten minutes, a scratch file, no project needed.
 
-You don't need a project for this. A scratch file is enough.
+Write a small function that takes something unknown and gives back `"basic"`, `"premium"`, or
+`null`. Start from `const TIERS = ["basic", "premium"] as const;` and use
+`TIERS.find(t => t === raw)`. Look at what you just built: it inspected the real value and returned
+either a known-good answer or an honest *no*. That's a turnstile, in six lines, with no library.
 
-1. Write a function that takes something unknown and returns either `"basic"`, `"premium"`, or
-   `null`. Start from `const TIERS = ["basic", "premium"] as const;` and use
-   `TIERS.find(t => t === raw)`. Look at what you just did: you checked the real value, and got back
-   either a known-good answer or an honest "no". That's a turnstile, in about six lines, with no
-   library at all.
-2. Now write the broken version: `const tier = raw as "basic" | "premium"`. Call both with the
-   string `"delux"`, then with the number `7`.
-3. Before you run it, predict what each one gives you. Then check. The interesting part isn't which
-   one is wrong — it's that **neither of them produced a single compiler error.**
+Now write the broken twin: `const tier = raw as "basic" | "premium"`. Call both with the string
+`"delux"`, then with the number `7`.
+
+Before you run it, say out loud what each one will give you. Then run it. The interesting part isn't
+which one is wrong — it's that **neither of them produced a single compiler error.** Both looked
+equally fine while you were writing them. Only one of them was ever going to tell you the truth.
 
 <Quiz>
   <Question q="Why can't a type annotation protect you from bad data arriving over the network?">
-    Because the annotations are removed when TypeScript compiles to JavaScript. They shape the code you write, but by the time real data shows up there is nothing left to compare it against.
+    Because annotations are deleted when TypeScript compiles to JavaScript. They shape the code you write, but by the time real data shows up there is nothing left to compare it against.
   </Question>
   <Question q="Why is a silent wrong answer worse than a crash?">
-    A crash tells you. It has a time, a stack trace, and something to fix. A wrong answer returned with a success code looks exactly like a correct one, so nobody investigates — it can sit in production for months.
+    A crash tells you. It has a time, a trail, and something to fix. A wrong answer sent with a success code looks exactly like a right one, so nobody investigates — it survives until a human happens to notice.
   </Question>
-  <Question q="If you write both the app sending the data and the endpoint receiving it, why still check?">
-    Because the two sides agreeing is a fact about right now, not a guarantee. Old app versions, changed serializers and replayed requests all break the agreement without anyone editing the endpoint.
+  <Question q="If you wrote both the app sending the data and the endpoint receiving it, why still check?">
+    Because the two sides agreeing is a fact about right now, not a guarantee. Old app versions, changed serializers and replayed requests all break the agreement without anyone touching the endpoint.
   </Question>
 </Quiz>
 
 <Takeaway>
 A type is a promise **you** make to the compiler. A check is a promise the **data** makes to you.
-Only one of them is still around when the code runs — so put a turnstile at every door where data
+Only one of them is still standing when the code runs — so put a turnstile at every door where data
 comes in, and let everything inside the building trust its badge.
 </Takeaway>

@@ -1,4 +1,4 @@
-import { TriangleAlert, Lightbulb, StickyNote } from "lucide-react";
+import { Lightbulb, Sparkles, StickyNote, TriangleAlert } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -56,6 +56,37 @@ export function Callout({
       <div className="space-y-2 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
         {children}
       </div>
+    </aside>
+  );
+}
+
+/**
+ * The whole lesson, up front, in about thirty seconds of reading.
+ *
+ * It exists so the lesson is useful even on a day you have no appetite for a
+ * story: read this, and you already have the point. Everything after it is the
+ * same idea earned slowly, with the reasoning attached.
+ */
+export function InBrief({
+  children,
+  principle,
+}: {
+  children: React.ReactNode;
+  /** The one line to remember, repeated as the takeaway at the end. */
+  principle: string;
+}) {
+  return (
+    <aside className="not-prose mb-8 rounded-card border border-line bg-subtle/50 px-4 py-4 sm:px-5">
+      <p className="mb-2 flex items-center gap-2 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.1em] text-ink-muted">
+        <Sparkles className="size-3.5 text-accent" aria-hidden />
+        The short version
+      </p>
+      <div className="space-y-2 font-sans text-[0.9375rem] leading-relaxed text-ink-secondary [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+        {children}
+      </div>
+      <p className="mt-3 border-t border-line pt-3 font-serif text-[1rem] font-semibold leading-snug text-ink">
+        {principle}
+      </p>
     </aside>
   );
 }

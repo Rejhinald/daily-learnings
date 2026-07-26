@@ -173,6 +173,160 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     definition:
       "A React component that ships to the browser so it can respond to clicks, typing and other interaction. Everything in it becomes JavaScript the visitor downloads.",
   },
+
+  // --- Everyday building blocks -------------------------------------------
+  // These are the words a lesson uses in passing and assumes you know. They
+  // are here so that assumption is never load-bearing.
+  "try/catch": {
+    term: "try / catch",
+    category: "JavaScript",
+    definition:
+      "A way to say \"attempt this, and if it blows up, run that instead\". The try block holds the risky work; the catch block receives the error. What you do inside catch is a real decision, not a formality.",
+  },
+  "throw": {
+    term: "throw",
+    category: "JavaScript",
+    definition:
+      "Deliberately raising an error to stop what you are doing. It travels up until something catches it, or it crashes the operation.",
+  },
+  "exception": {
+    term: "Exception",
+    category: "JavaScript",
+    definition:
+      "The error object produced when something goes wrong. It carries a message and a trail of where it happened.",
+  },
+  "middleware": {
+    term: "Middleware",
+    category: "Web",
+    definition:
+      "Code that sits between the incoming request and the code that answers it. It can inspect the request, block it, or wave it through. Logging, rate limits and permission checks usually live here.",
+  },
+  "async": {
+    term: "async",
+    category: "JavaScript",
+    definition:
+      "Marks a function as one that may need to wait for something — a network call, a file read — without freezing the rest of the program.",
+  },
+  "await": {
+    term: "await",
+    category: "JavaScript",
+    definition:
+      "Pauses inside an async function until the thing you are waiting for finishes, then continues with the result. It makes waiting read like ordinary top-to-bottom code.",
+  },
+  "promise": {
+    term: "Promise",
+    category: "JavaScript",
+    definition:
+      "A placeholder for a value that is not ready yet. It either settles with the value or with an error, and await is how you unwrap it.",
+  },
+  "null": {
+    term: "null",
+    category: "JavaScript",
+    definition:
+      "A deliberate \"there is nothing here\". Distinct from undefined, which usually means nobody ever put anything here in the first place.",
+  },
+  "undefined": {
+    term: "undefined",
+    category: "JavaScript",
+    definition:
+      "What you get when you ask for something that was never set. Reading a property that does not exist gives you this rather than an error.",
+  },
+  "token": {
+    term: "Token",
+    category: "Web",
+    definition:
+      "A string that proves who you are, sent with a request instead of a password. Anyone holding it is treated as you, which is why they are short-lived and never logged.",
+  },
+  "header": {
+    term: "Header",
+    category: "Web",
+    definition:
+      "A labelled line of metadata attached to a request or response — who is asking, what format they want, what token they carry. Separate from the body, which holds the actual data.",
+  },
+  "status code": {
+    term: "Status code",
+    category: "Web",
+    definition:
+      "The three-digit number a response leads with, summarising what happened. 2xx worked, 4xx means the caller got it wrong, 5xx means the server did.",
+  },
+  "401": {
+    term: "401 Unauthorized",
+    category: "Web",
+    definition:
+      "The status meaning \"I do not know who you are\". The caller needs to log in or send a valid token.",
+  },
+  "403": {
+    term: "403 Forbidden",
+    category: "Web",
+    definition:
+      "The status meaning \"I know who you are, and you are not allowed\". Different from 401, where the problem is identity rather than permission.",
+  },
+  "rate limit": {
+    term: "Rate limit",
+    category: "Web",
+    definition:
+      "A cap on how often someone may call you, so one caller cannot swamp the service. Usually counted per user or per address over a window of time.",
+  },
+  "environment variable": {
+    term: "Environment variable",
+    category: "Practice",
+    definition:
+      "A setting handed to your program by the machine it runs on, rather than written in the code. It is how secrets and per-environment differences stay out of the repository.",
+  },
+  "fail open": {
+    term: "Fail open",
+    category: "Practice",
+    definition:
+      "When a check cannot run, let the request through. Keeps things available, at the cost of the protection the check was providing.",
+  },
+  "fail closed": {
+    term: "Fail closed",
+    category: "Practice",
+    definition:
+      "When a check cannot run, refuse the request. Preserves the protection, at the cost of turning a broken check into an outage.",
+  },
+  "guard": {
+    term: "Guard",
+    category: "Practice",
+    definition:
+      "Any check that runs before the real work and decides whether it happens at all — a login check, a rate limit, a feature flag.",
+  },
+  "edge case": {
+    term: "Edge case",
+    category: "Practice",
+    definition:
+      "The unusual input nobody pictured while writing the happy path — empty lists, missing fields, the very first run, two things arriving at once.",
+  },
+  "regression": {
+    term: "Regression",
+    category: "Practice",
+    definition:
+      "Something that used to work and now does not, usually broken as a side effect of an unrelated change.",
+  },
+  "refactor": {
+    term: "Refactor",
+    category: "Practice",
+    definition:
+      "Changing the shape of code without changing what it does, usually to make the next change easier.",
+  },
+  "dependency": {
+    term: "Dependency",
+    category: "Practice",
+    definition:
+      "Someone else's code your project relies on. Convenient, and also a thing that can change under you.",
+  },
+  "build": {
+    term: "Build",
+    category: "Practice",
+    definition:
+      "The step that turns the code you wrote into the files that actually get served — compiling, bundling and generating pages ahead of time.",
+  },
+  "cache": {
+    term: "Cache",
+    category: "Practice",
+    definition:
+      "A saved copy of an answer, kept so you do not have to work it out again. Fast, and wrong the moment the real answer changes without the copy knowing.",
+  },
 };
 
 export const GLOSSARY_KEYS = Object.keys(GLOSSARY);

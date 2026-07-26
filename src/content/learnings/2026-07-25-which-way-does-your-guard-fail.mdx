@@ -2,7 +2,7 @@
 title: "When Your Safety Check Breaks, Which Way Does It Fail?"
 slug: "which-way-does-your-guard-fail"
 publishedAt: "2026-07-25"
-summary: "Every check that runs before your real code — a login check, a rate limit, an analytics filter — can itself break or be left unconfigured. When it does, the request either passes or it stops. That direction is a design decision, and choosing it by accident is how you either lock everyone out or leave the door wide open."
+summary: "A token service hiccups for thirty seconds, and for thirty seconds the admin dashboard has no lock on it at all. Nothing crashes, nothing alerts, the graphs stay green. The catch block had quietly decided which way the check should fail."
 sourceProject: "Internal marketing and lead-capture platform"
 language: "TypeScript"
 difficulty: "intermediate"
@@ -26,17 +26,51 @@ relatedSlugs:
   - "parse-at-the-trust-boundary-instead-of-casting"
 ---
 
+<InBrief principle="Every guard fails in some direction. Decide which one on purpose, or the code decides for you — usually the wrong way.">
+
+Before your real code runs, small pieces of code often stand in front of it deciding whether the
+request may continue at all — a login check, a rate limit, a filter that drops junk. A
+<Term>guard</Term>.
+
+A guard has three possible outcomes, not two: *yes*, *no*, and **"I couldn't check."** That third
+one is the one nobody designs. It shows up when a dependency is down or a setting is missing — and
+it still has to resolve into either letting the request through or stopping it.
+
+Letting it through is <Term of="fail open">failing open</Term>. Stopping it is
+<Term of="fail closed">failing closed</Term>. Which one is correct depends entirely on what stands
+behind the door: guard something valuable and unsure must mean *no*; guard something optional and
+unsure should mean *carry on*.
+
+</InBrief>
+
 ## The door that was never locked
 
-A team ships a permission check on their admin routes. It reads the caller's login token, confirms the person is an admin, and only then runs the real code. Textbook.
+A team ships a permission check on their admin routes. It reads the caller's login token, confirms
+the person is an admin, and only then runs the real code. Textbook.
 
-To be careful, someone wraps the whole check in a `try/catch`, so a malformed token can never crash the server with a <Term of="500">500</Term>. Inside the catch they log the error and — this is the part to watch — let the request continue anyway. It looks defensive. It reviews clean. It ships.
+Then someone reviewing it has a sensible thought: what if the token is malformed and this throws?
+The whole server would answer <Term of="500">500</Term>. So they wrap the check in a `try/catch`.
+Inside the catch they log the error and — this is the part to watch — let the request continue
+anyway.
 
-Months later the token service has a thirty-second hiccup. For those thirty seconds, *every* token check throws. Every throw lands in the catch. Every catch lets the request through.
+It looks defensive. It reads as careful. It reviews clean, and it ships, and for months it is
+completely fine.
 
-So for thirty seconds, the admin dashboard has no lock on it at all. Anyone who knocks gets in. And the whole time, the <Term>endpoint</Term> keeps answering <Term of="200 ok">200 OK</Term>, cheerful as ever. Nothing crashes. No alert fires. The graphs look normal. The only way you would ever find this is by reading the code.
+Then, on some ordinary afternoon, the token service has a thirty-second hiccup.
 
-The bug was not the `try/catch`. The bug was that nobody ever decided *which way the check should fail.*
+For those thirty seconds, *every* token check throws. Every throw lands in the catch. Every catch
+lets the request through. The admin dashboard — the one with everybody's data behind it — has no
+lock on it at all. Anyone who knocks, gets in.
+
+And the whole time, the <Term>endpoint</Term> is answering <Term of="200 ok">200 OK</Term>, cheerful
+as ever. Nothing crashes. No alert fires. The graphs stay flat and green. Thirty seconds later the
+token service recovers and the lock quietly comes back, and nobody ever knows it was off.
+
+The only way you would ever find that is by reading the code.
+
+And here's the thing: the `try/catch` wasn't the bug. Wrapping it was the right instinct. The bug was
+that nobody ever decided *which way the check should fail* — so the catch block decided, silently, on
+everyone's behalf.
 
 ## Every guard fails in some direction
 

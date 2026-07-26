@@ -121,25 +121,66 @@ Example: `internal-quoting-app|api-route-handler|input-validation|parse-at-the-t
 It must contain **no absolute paths** and nothing client-identifying. It exists so the same topic is
 never taught twice.
 
-### How to write — read this twice
+### How to write — this is the part that matters most
 
-The reader builds working software every day but never got the formal fundamentals, and he has said
-so directly: *"wordings are too technical, I'm more of a concepts person, so I need to understand why
-things work and why this way and why not this way."*
+The reader builds working software every day but never got the formal fundamentals. He has told me
+twice what goes wrong, and the second time was blunt:
 
-That is a instruction about **order**, not about depth. Keep the engineering honest; bring the prose
-down a level.
+> *"I'm still getting lost in the sauce. When I'm reading, my mind just drifts away from the content.
+> The feeling isn't the same as reading a novel, a book, a manwha, where it just flows and you can
+> imagine it. In this text I can't."*
 
-- **Idea before name.** Explain the thing in everyday words, let him feel why it matters, and only
-  *then* say "this is called X". Never open a section with the jargon.
-- **Always answer "why this way and not that way."** For every pattern, work through the obvious
-  alternatives — the ones a working developer would actually reach for — and show why each loses.
-  This is the single thing he asks for most. Give it its own section.
-- **Open with a concrete failure story**, not a definition. What broke, what the developer saw on
-  screen, why it was confusing.
-- **One new term at a time.** Cut any vocabulary that is not load-bearing.
-- **Carry the analogy through** the lesson rather than dropping it after one line.
-- Short paragraphs. Plain verbs. No sentence that exists to sound rigorous.
+So the bar is not "technically accurate and well organised". A reference manual is both of those and
+he cannot stay awake through it. **The bar is that he keeps reading because he wants to know what
+happens next.** Write prose, not documentation.
+
+**Tell it as a story with something at stake.**
+
+- Open on a **scene**, not a statement. A time, a person, a message, something on a screen. "It's a
+  Tuesday. Someone in sales messages you: the quote came back blank." Not "Consider an endpoint
+  that..."
+- Give it a **shape**: something works, something breaks, you investigate, you discover why, you fix
+  it. Tension then release. Let the reader be confused *with* you for a paragraph before you explain.
+- **Show the evidence.** The actual log line. The actual JSON. The blank field. Concrete beats
+  abstract every time.
+- **Use "you"** and put him in the chair. He is the one reading the logs.
+- **Vary the rhythm.** Short sentences land the beat. Longer ones do the explaining. A one-line
+  paragraph is allowed and lands hard.
+- **Carry one image all the way through** — labels peeled off boxes, a bouncer stepping away from a
+  door — and return to it at the end. Do not introduce three metaphors.
+- Write **paragraphs**, not bullets, in the narrative sections. Bullets are for genuine lists (the
+  alternatives, the mistakes). A wall of bullets is exactly what makes his eyes slide off.
+- Name a feeling when it is real: the instinct to hunt for a typo, the moment it stops making sense.
+
+**Things that break the spell — do not do them.** "Consider the following." "It is worth noting
+that." "Note that." "This is important because." Passive voice. Headings like "Problem statement" or
+"Implementation details". Any sentence whose job is to sound rigorous.
+
+**Still true, from before:**
+
+- **Idea before name.** Explain it in everyday words, let him feel why it matters, and only *then*
+  say "this is called X". Never open a section with the jargon.
+- **Always answer "why this way and not that way."** Work through the alternatives a working
+  developer would actually reach for, and show honestly where each runs out. Give it its own section.
+  Do not strawman them — reach for them sympathetically, then find the edge.
+- **One new term at a time.** Cut vocabulary that is not load-bearing.
+
+### The short version, up top
+
+Every lesson **must** open with `<InBrief>`, immediately after the frontmatter:
+
+```mdx
+<InBrief principle="The one line worth remembering.">
+
+Two to four short paragraphs giving the complete lesson: what goes wrong, why, and what to do
+instead. No story, no build-up — just the content, plainly.
+
+</InBrief>
+```
+
+This is not a teaser. It is the whole lesson compressed, so the page is useful on a day he has no
+appetite for a story. Everything after it is that same idea earned slowly. The `principle` should be
+the same line you close with in `<Takeaway>`.
 
 ### Marking up jargon
 
@@ -158,25 +199,40 @@ the glossary lacks, explain it in ordinary prose instead of inventing a key.
 
 Aim for roughly 8-15 marked terms in a lesson. Marking everything is as unhelpful as marking nothing.
 
+**You get one for free:** inline code whose text exactly matches a glossary key is wrapped
+automatically, so writing `` `try/catch` `` in prose already explains itself. You do not need to mark
+those by hand — but you *do* need to check the glossary before using a jargon word in plain prose,
+because a word that is neither marked nor in the glossary is a word the reader has to look up
+elsewhere, and that is exactly where he loses the thread.
+
+**Never wrap inline code in `<Term>` yourself.** Write `` `try/catch` ``, not
+``<Term>`try/catch`</Term>``. Doing both nests a button inside a button, which is invalid HTML and
+breaks the page at runtime. Validation rejects it.
+
 ### Required sections
 
-Five to eight minutes of reading. Use `##` for each section — they become the page's section index,
-so give them human titles ("The bug that doesn't look like a bug", not "Problem statement").
+Six to nine minutes of reading, `<InBrief>` included. Use `##` for each section — they become the
+page's index, so give them titles that sound like beats in a story, not parts of a spec. "The quote
+that came back empty", "Why nobody's pager went off", "The four things you'll want to try first" —
+never "Problem statement" or "Implementation".
 
-1. **The failure story** — what goes wrong, concretely, before any theory.
-2. **The one idea** — the concept in plain English. Name it only after explaining it.
-3. **Why it behaves that way** — the mechanism underneath, still in plain words.
-4. **Mental model** — an analogy that makes it stick, carried through. Avoid clichés.
-5. **Why not just...?** — two to four alternatives a reasonable developer would try, each with an
-   honest account of why it loses. Do not strawman them.
-6. **What to do instead** — 8-30 lines in a fenced block with a language tag. Rewritten and
-   generalised. Conceptually correct, no unexplained placeholders.
-7. **Reading that, block by block** — explain in logical blocks, never line-by-line paraphrase.
-8. **What the two paths look like** — a small text diagram in a fence with **no** language tag
-   (that renders as a diagram, not code).
-9. **Where this goes wrong in practice** — two or three realistic mistakes.
-10. **Try this** — one small thing to do in a scratch file. It must **never** require modifying a
-    private repository, and should end with a prediction to check.
+1. **The scene** — someone notices something wrong. Concrete, with evidence on screen. No theory yet.
+2. **What was actually happening** — the reveal, in plain words. Name the concept only after the
+   reader can already picture it.
+3. **Why it didn't just crash** (or the equivalent "why this is sneaky") — the mechanism underneath.
+4. **The image** — the analogy, introduced properly and carried through the rest of the lesson.
+5. **The things you'll want to try first** — two to four alternatives, reached for sympathetically,
+   each followed by where it runs out.
+6. **The fix** — 8-30 lines in a fenced block with a language tag. Rewritten and generalised.
+   Conceptually correct, no unexplained placeholders.
+7. **Walking through it** — logical blocks, never line-by-line paraphrase. Point at the one line that
+   does the damage, or the one that saves you.
+8. **The two paths** — a small text diagram in a fence with **no** language tag (renders as a
+   diagram, not code). Then one paragraph on what to notice in it.
+9. **Where this bites in real life** — two or three realistic mistakes.
+10. **Try this tonight** — one small thing in a scratch file, ten minutes, no project needed. It must
+    **never** require modifying a private repository, and should end with a prediction to check
+    before running.
 
 Then close with the two components, which need no import:
 

@@ -3,8 +3,9 @@ import Link from "next/link";
 import { isValidElement } from "react";
 
 import { CodeBlock } from "@/components/code-block";
-import { Callout, Flow, Question, Quiz, Takeaway } from "@/components/mdx-ui";
+import { Callout, Flow, InBrief, Question, Quiz, Takeaway } from "@/components/mdx-ui";
 import { Term } from "@/components/term";
+import { lookupTerm } from "@/lib/glossary";
 import { toSlug } from "@/lib/learnings";
 
 /**
@@ -112,6 +113,27 @@ export function useMDXComponents(): MDXComponents {
       </ul>
     ),
 
+    /*
+     * Inline code that names a glossary term explains itself automatically.
+     *
+     * Without this, `try/catch` in prose renders with a background and border —
+     * it *looks* highlighted — but hovering does nothing, which is a promise the
+     * page fails to keep. Now the lookup happens for every occurrence, so an
+     * author cannot forget to mark one.
+     */
+    code: ({ children, ...props }) => {
+      const text = textOf(children).trim();
+      const entry = lookupTerm(text);
+      if (!entry) {
+        return <code {...props}>{children}</code>;
+      }
+      return (
+        <Term of={text}>
+          <code {...props}>{children}</code>
+        </Term>
+      );
+    },
+
     table: ({ children, ...props }) => (
       <div className="my-5 overflow-x-auto">
         <table {...props}>{children}</table>
@@ -121,6 +143,7 @@ export function useMDXComponents(): MDXComponents {
     // Available to every lesson without an import.
     Callout,
     Flow,
+    InBrief,
     Quiz,
     Question,
     Takeaway,
