@@ -1,0 +1,242 @@
+---
+title: "The Tests Were Green Because Nothing Was There"
+slug: "green-because-nothing-was-there"
+publishedAt: "2026-07-27"
+summary: "A prop in a generated scene comes out with half of it missing, and a second one never appears at all. Forty-six tests pass, the typecheck passes, the linter passes. Every assertion in the suite was a sentence about the things that exist, and not one of them could notice that the things had stopped existing."
+sourceProject: "Browser-based 3D scene builder"
+language: "TypeScript"
+difficulty: "intermediate"
+estimatedMinutes: 8
+topics:
+  - "Testing"
+  - "TypeScript"
+  - "Debugging"
+  - "Code quality"
+  - "Reliability"
+concepts:
+  - "Vacuous truth"
+  - "Work that silently does not happen"
+  - "Asserting that output exists"
+  - "Output floors"
+  - "Counting what you drop"
+originKind: "recent-change"
+sequence: 4
+sourceFingerprint: "7b2d5a0e93c14f68d0a7e215"
+relatedSlugs:
+  - "which-way-does-your-guard-fail"
+---
+
+<InBrief principle="Assertions only ever describe what exists — so write the one that insists something does.">
+
+Almost every test you write is a sentence about the output: every row has a date, every block touches another block, no field is blank. Run any of those against output that came back *empty* and they all pass. A claim about every member of a collection is automatically true when the collection has no members, so a suite made of such claims is structurally blind to the one failure where your code produced nothing at all.
+
+That failure is easy to reach. A loop whose bounds arrive in the wrong order runs zero times. A function that hits a missing precondition and returns early does nothing. Neither raises an error, because absence is not invalid — an empty array is a perfectly good array and zero is a perfectly good number. Types can describe the *shape* of your output, never how much of it there should be.
+
+So add the assertion nothing else makes: that work happened at all. Put a floor under the volume of output — set comfortably below the real figure, so it catches collapse rather than drift — and make any operation that throws input away count what it threw away instead of discarding it in silence. Two numbers, and the failure that used to be invisible turns into a red line in two hundred milliseconds.
+
+</InBrief>
+
+## The pillar that wasn't there
+
+It's late, and you're finishing a rebuild of the generator that assembles the little 3D scene on your front page — a landscape stacked out of cubes, with a few props standing on it. It was a big <Term>refactor</Term>: a lot of code moved. You run the suite out of habit before you look at anything.
+
+```
+ ✓ scene invariants      (12)
+ ✓ blocks and materials   (9)
+ ✓ mesher                (14)
+ ✓ lighting              (11)
+
+ Test Files  4 passed (4)
+      Tests  46 passed (46)
+```
+
+Typecheck clean. Linter clean. The <Term>build</Term> goes through without a warning. So you reload the page to admire your work.
+
+The gate at the front of the scene has one pillar.
+
+Not a broken pillar. Not a pillar in the wrong place. One post, holding up a crossbeam that is supposed to be sitting on two. And when your eye travels right, the waterfall you spent the whole evening on — the channel, the lip, the fall — is simply not in the scene. There is an unbroken hillside where it should be.
+
+You scroll back up to the terminal, because surely you misread it. Forty-six passed. Nothing skipped, nothing pending.
+
+Two visible pieces of the thing are missing, and not one test in the suite has an opinion about that.
+
+## Two different bugs, one shape
+
+The gate first, because it's the smaller one.
+
+The gate is drawn by mirroring: build the right half, then call the same helper again with the coordinates flipped to build the left. The helper fills an inclusive range, roughly the way you'd expect:
+
+```ts
+for (let x = x0; x <= x1; x++) place(x, y, "wood");
+```
+
+On the right-hand call, `x0` is smaller than `x1` and it fills the post. On the mirrored call, the flipped coordinates arrive the other way round — `x0` is now the *larger* number. So `x0 <= x1` is false the very first time it's checked, the body never runs, and the function returns normally having done nothing.
+
+The waterfall is a different mistake with the same ending. It starts by asking the terrain how high the ground is at its starting point, and bails out if the answer is "there is no ground here" — a sensible <Term>guard</Term>, the kind you'd write on purpose. What you didn't notice is that an earlier step had already carved a channel straight through the thin crust at that spot. So the probe found no ground, the guard fired exactly as designed, and every stage of the waterfall returned early. Correct code, correct behaviour, no output.
+
+Now look at what the suite was actually asserting. *No block floats with nothing beside it.* *Every block's material is one that exists.* *No two props occupy the same cell.* Every single one of those is a sentence that starts with "every block that…". Run them against a gate missing an entire pillar and they don't just pass — they pass comfortably, with room to spare. There is nothing wrong with the blocks that are there.
+
+There just aren't enough of them, and nothing in the room was counting.
+
+## Why "every" can't see an empty box
+
+Here is the piece of logic underneath, and it is not a bug in your reasoning — it is how the word "every" works.
+
+Say I claim: *every coin in this box is a silver coin.* You open the box. It's empty. Did I lie?
+
+No. To prove me wrong you'd have to produce a coin from that box that isn't silver, and you can't, because there are no coins. My claim survives — not because it was checked, but because there was nothing to check it against. It is *technically* true and completely worthless.
+
+That is what happens to every assertion you wrote. "Every block touches another block" is a claim about the blocks; with no blocks, there is no counterexample to find, so it passes. Ten more assertions of the same kind are ten more passes. You can add checks all night and never move, because they are all claims of the same shape, and the shape is the problem.
+
+This idea has a name: a statement about all the members of an empty collection is **vacuously true**. Once you can see it, you start noticing it everywhere in your test files.
+
+<Callout type="insight" title="The shape to watch for">
+
+Any assertion phrased as "every X is…", "no X is…", or "none of the X are…" is vacuously true on an empty output. That covers most of what a normal suite contains. The exceptions — the checks that can actually fail on nothing — are the ones that count, compare a total, or look for a specific item by name.
+
+</Callout>
+
+## Why nothing crashed
+
+The other half of the sneakiness is that at no point did your program do anything illegal.
+
+A loop whose condition is false on its first evaluation is not an error, and not an exotic <Term>edge case</Term> either. It is the same code path as looping over an empty list, which happens a thousand times a day in healthy software. An early `return` on a missing precondition is not an error either; it's the responsible thing to do. And an empty result is a legal value all the way up: an empty array is a perfectly good array, an empty map is a perfectly good map, zero is a perfectly good number.
+
+The <Term>compiler</Term> is no help here, and it isn't being lazy. A <Term of="type annotation">type annotation</Term> describes what kind of thing you have, not how many. A function typed to return an array of blocks is completely satisfied by an array of no blocks — and the types are gone by the time the code actually runs anyway, so nothing is watching at <Term>runtime</Term>. There is no ordinary annotation for "at least one".
+
+So this is a <Term>silent failure</Term> in its purest form: no <Term>exception</Term>, no log line, no failing check, no red anywhere. The absence of geometry is never *invalid*. It's just empty.
+
+## The inspector at the end of the belt
+
+Picture a factory line with an inspector at the end of it. His job is every box that comes past: is it sealed, is it labelled, is the weight right? He is genuinely excellent at it. Nothing defective has got past him in a year.
+
+Today a jam upstream stops the belt at half past nine. Nothing comes down the line for the rest of the shift.
+
+At six o'clock he files his report, and it says: **zero defects.** That report is true. He inspected every box that reached him and every one of them was fine. It is also the most misleading sentence in the building, because the factory shipped nothing today and his report is the reason nobody noticed until the orders started bouncing.
+
+He isn't a bad inspector, and hiring a second one changes nothing — a second inspector also has no boxes to inspect. What's missing isn't scrutiny. It's a tally counter on the wall: *how many boxes came past today?* One number, and the empty belt becomes impossible to miss.
+
+Hold onto the tally counter. Everything below is where to nail it up.
+
+## The four things you'll want to try first
+
+**"Write more assertions about the output."** The instinct is right almost every other day of the year — more checks really do mean more confidence. But read the ones you already have and notice they all begin the same way: *every block…*, *no block…*. Adding an eleventh sentence of that shape to a suite of ten adds an eleventh vacuous pass. You aren't short of scrutiny. You're short of a box on the belt.
+
+**"Make the types stronger."** Genuinely worth reaching for, and TypeScript can express a non-empty array — a tuple with one required element followed by the rest. At an outer seam, where a function hands back a fresh collection, that's real protection and it would have caught a builder that returned nothing. It runs out in two places: the builders here don't *return* a collection, they write into one they were handed, so there's no return value to constrain; and even a perfect type is erased before your code runs, so it can never tell you that a loop ran two hundred and forty times when it should have run four hundred and eighty.
+
+**"Snapshot the output."** A real technique with a real edge, and the edge cuts both ways. The first snapshot is a photograph of whatever your code did on the day you added it — take that photograph the same evening the gate lost its pillar and you have just certified the bug as the expected result. And the day a snapshot legitimately turns red, the muscle memory is to regenerate it, which means the one time it would have saved you, it's a keystroke from being overwritten. Useful. Not a smoke alarm.
+
+**"Coverage would catch a loop body that never runs."** The fairest of the four, and it nearly works. But the gate's loop body *did* run — the right-hand pillar called the very same helper and executed the very same line. Coverage is measured per line across the whole suite, so a line that runs for one caller and not the other reports as covered. It tells you a line was reached. It can't tell you a line was reached half as often as it should have been.
+
+## The two numbers that would have caught both
+
+```ts
+/** A writer that keeps books on itself: what it stored, what it refused. */
+class Grid {
+  private cells = new Map<string, string>();
+  /** Writes that fell outside the grid. Dropped, but never in silence. */
+  refused = 0;
+  get size() { return this.cells.size; }
+
+  set(x: number, y: number, value: string): void {
+    if (!inRange(x, y)) {
+      this.refused++;
+      return;
+    }
+    this.cells.set(`${x},${y}`, value);
+  }
+
+  /** Inclusive fill, from either corner. */
+  fill(x0: number, y0: number, x1: number, y1: number, value: string): void {
+    for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++)
+      for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++)
+        this.set(x, y, value);
+  }
+}
+
+it("the gate is actually drawn", () => {
+  const grid = new Grid();
+  drawGate(grid);
+  expect(grid.refused, "some writes landed outside the grid").toBe(0);
+  // A floor at roughly 60% of the real figure: catches collapse, ignores drift.
+  expect(grid.size, "the gate built nothing — did it return early?").toBeGreaterThan(250);
+});
+```
+
+## Walking through it
+
+**The `refused` counter is the whole first idea.** Without it, "we threw that write away" and "there was nothing to throw away" look identical from outside the object — both are a method that returns nothing and leaves no trace behind. The counter is what tells them apart. A drop you counted is a fact you can assert on; a drop that vanishes is a rumour.
+
+Note that the write is still *dropped* rather than thrown. That's deliberate: a decorative scene should never take the page down over one stray coordinate. But dropping it in silence would be worse than either choice, so you drop it and keep the receipt. Which way a guard fails is a decision, and this one is "let it through, and write it down."
+
+**The line that does the damage in the original is the `for` line** — specifically what `x0` and `x1` are when they get there. `Math.min` and `Math.max` don't fix a caller who passes the corners backwards; they make the question stop mattering. The helper now fills the same region whichever corner it's handed, so the zero-iteration path is gone rather than merely unlikely.
+
+**The floor is the tally counter on the wall.** Notice it isn't the real number. If you assert exactly 480 you've built yourself a snapshot by hand: every legitimate tweak to the gate turns it red, you retrain yourself to bump the number without thinking, and the check quietly stops being a check. A floor at roughly 60% of the true figure is deliberately loose — a missing pillar is a 40% collapse and trips it instantly, while ordinary fiddling never comes near it. Smoke alarm, not tape measure.
+
+**The messages inside `expect` are load-bearing too.** At three in the morning, "expected 0 to be greater than 250" tells you a number. "The gate built nothing — did it return early?" tells you where to look first.
+
+## The two paths
+
+```
+                       drawGate(grid)
+                              │
+          ┌───────────────────┴───────────────────┐
+   corners reversed                        corners normalised
+   (x0 greater than x1)                           │
+          │                                       │
+   loop never enters                       480 cells written
+   0 cells written                                │
+          │                                       │
+   "every cell is wood"    TRUE            "every cell is wood"    TRUE
+   "no cell floats"        TRUE            "no cell floats"        TRUE
+   "at least 250 cells"    FAILS           "at least 250 cells"    TRUE
+          │                                       │
+   caught in 200ms                         ships with two pillars
+```
+
+Look at the first two rows of assertions. They are *identical* on both sides — same words, same verdict, on a gate that exists and a gate that doesn't. Every check you had was in those two rows. The third row is the only sentence in the file that can tell the two columns apart, and the only difference between it and the others is that it's a claim about the collection rather than about its contents.
+
+## Where this bites in real life
+
+**The nightly job that emails nobody.** A scheduled task finds every customer whose renewal falls due tomorrow and sends a reminder. Someone touches the date comparison and inverts it; the query now matches no one. The job runs, logs "processed 0 records", exits successfully, and stays green for five weeks. The only test anyone had written was that every email it sends has a valid address — and it sent none, so every email it sent had a valid address.
+
+**The migration that succeeds without changing anything.** A backfill updates a column on the rows that need it. A typo in the condition means it matches nothing. Your migration runner asks one question — did it error? — and the answer is no. It records the migration as applied, and now it will never run again. The next deploy builds on data that was never backfilled.
+
+**The list that renders empty.** A component test asserts that no error row is displayed and that every row shows a formatted total. Both pass on a screen showing nothing at all, because the fetch quietly returned an empty page of results. The <Term>regression</Term> reaches production looking exactly like "this customer has no orders yet."
+
+## Try this tonight
+
+Open a scratch file. Ten minutes, no project needed.
+
+```ts
+const nothing: number[] = [];
+
+console.log(nothing.every((n) => n > 100)); // A
+console.log(nothing.every((n) => n < 100)); // B
+
+let ran = 0;
+for (let i = 5; i <= 2; i++) ran++;
+console.log(ran);                           // C
+
+console.log(nothing.length > 0);            // D
+```
+
+Predict all four before you run it, and write the guesses down. A and B are deliberately contradictory — every number in that list is above 100, *and* every number in it is below 100. Decide what each one prints, then decide how you feel about your answers to A and B being the same.
+
+Then run it. The point isn't that the output surprises you; it's that no quantity of lines like A and B will ever notice the list is empty, and D — the least clever line in the file — is the only one that can.
+
+<Quiz>
+  <Question q="Your export test asserts that every record has a valid date. The export comes out completely empty. Does the assertion pass, and why?">
+    It passes. A claim about every member of a collection is automatically true when the collection has no members — there is no record you could point at to disprove it. This is called being vacuously true: the assertion did not verify anything, it simply had nothing to fail against. Most of a normal suite is made of assertions in exactly this shape.
+  </Question>
+  <Question q="Your builder function is typed to return an array of blocks and TypeScript is perfectly happy. Which failure can that type never rule out?">
+    That the array is empty, or far smaller than it should be. A type describes the shape of a value, not how much of it there is — an array of no blocks is a completely valid array of blocks. TypeScript can express a non-empty array as a tuple, which helps at a function's outer seam, but types are erased before the code runs, so nothing checks the quantity at runtime. Counting is a job for a real assertion.
+  </Question>
+  <Question q="You add a check that a prop builds at least 250 cells when the real figure is 480. Why not simply assert exactly 480?">
+    Because an exact count is a snapshot you maintain by hand. Every legitimate tweak turns it red, so you train yourself to update the number without thinking, and the check stops being a check. A floor set well below the true figure catches the failure you actually care about — the output collapsing to nothing or to a fraction — while ignoring the harmless drift of ordinary work. It is a smoke alarm, not a tape measure.
+  </Question>
+</Quiz>
+
+<Takeaway>
+Assertions only ever describe what exists — so write the one that insists something does. Put a floor under how much output your code must produce, and make anything that discards input count what it discarded, because a suite full of "every X is fine" can never tell a clean result from an empty one.
+</Takeaway>
