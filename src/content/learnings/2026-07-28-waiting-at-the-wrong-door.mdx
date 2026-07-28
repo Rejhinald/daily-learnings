@@ -1,0 +1,254 @@
+---
+title: "You Were Waiting at the Wrong Door"
+slug: "waiting-at-the-wrong-door"
+publishedAt: "2026-07-28"
+summary: "A nightly job logs the same three timeouts four mornings running, so you go hunting for the selector that broke. The selector was fine. The job was waiting for a screen that was never going to appear, and waiting for one outcome can only ever tell you that one outcome did not happen."
+sourceProject: "Scheduled browser-automation job"
+language: "TypeScript"
+difficulty: "intermediate"
+estimatedMinutes: 8
+topics:
+  - "Async JavaScript"
+  - "Promises"
+  - "Automation"
+  - "Error handling"
+  - "Debugging"
+  - "Reliability"
+concepts:
+  - "A timeout is not a diagnosis"
+  - "Racing every possible outcome"
+  - "Discriminated result types"
+  - "Losing watchers must stay quiet"
+originKind: "recent-change"
+sequence: 5
+sourceFingerprint: "e2f4c8a1b7d3906e5f4a1c82"
+relatedSlugs:
+  - "green-because-nothing-was-there"
+  - "which-way-does-your-guard-fail"
+---
+
+<InBrief principle="A timeout only tells you what did not happen — so wait on every outcome you could land in, and let the code tell you what did.">
+
+Most waiting code names one thing and waits for it: the element to appear, the status to read "complete", the row to show up. When it arrives you carry on, and when it doesn't you get a timeout. But a timeout carries exactly one fact — *the thing I named did not arrive* — and it carries that same fact no matter what actually happened. A signed-out session, a renamed selector, a server handing back an error page: three different problems, one identical message. So the log is true and useless, and it points at the thing you named, which is rarely the thing that broke.
+
+Name every outcome you could plausibly land in instead, and wait on all of them at once. Hand back a small tagged value saying which one happened rather than a bare true or false, and keep one explicit deadline for the case where none of them do. When that deadline fires, read the state you are actually in before you write the log line, because "where am I right now" is a question your program can answer instantly and a stack trace can never answer at all.
+
+One rule while you do it. A watcher that loses the race has to go quiet, not fail. If a failed wait is allowed to settle the race, the first watcher to give up decides the answer for everybody — and you are straight back to a confident report of the wrong thing.
+
+</InBrief>
+
+## The same three lines, four mornings running
+
+You have a small job that runs at nine every morning. It opens a browser, signs into a dashboard you don't own, works down a queue of items, submits each one, and appends a summary to a log file. Unglamorous. It has been running happily for weeks.
+
+On Friday you open the log out of habit.
+
+```
+### run 2026-07-24
+- error: TimeoutError: locator.click: Timeout 15000ms exceeded.
+- error: TimeoutError: locator.click: Timeout 15000ms exceeded.
+- error: TimeoutError: locator.click: Timeout 15000ms exceeded.
+- aborting: 3 consecutive errors
+- totals: 0 submitted, 3 attempted
+```
+
+Then you scroll up. Thursday, the same five lines. Wednesday, the same five lines. Tuesday, the same five lines. Four mornings, nothing submitted, and a log that has been saying exactly this every day in a voice so level that nobody looked twice.
+
+At least the message is unambiguous. It tried to click something, it waited fifteen seconds, the something never became clickable three times running. So the dashboard has changed its markup and your selector has gone stale. That is the obvious read, and you have the whole morning free to go and find the new class name.
+
+Before you start, you run the job by hand with the window on screen, just to watch it fail.
+
+It opens the browser. It goes to the dashboard address. And it sits there, on a sign-in form, waiting patiently for a search box that is two screens away behind a password field.
+
+It has been sitting on a sign-in form since Monday.
+
+## Nothing was broken, and nothing was coming
+
+Your selector was never stale. There was simply no dashboard on the screen to click.
+
+The session had expired over the weekend. From that moment on, every morning ran like this: the job navigates to the dashboard, the server sees no valid <Term>token</Term>, and it does the ordinary, correct thing — it redirects to a sign-in page. Your code, meanwhile, is doing the ordinary, correct thing too: it is waiting for the dashboard's search box to become visible. Fifteen seconds later it gives up and <Term of="throw">throws</Term>.
+
+Look at what that <Term>exception</Term> is able to say. It knows the name of the thing it was told to find, and it knows the clock ran out. That is the whole of its knowledge. It has no idea that the page went somewhere else, because it was never asked to look anywhere else.
+
+Now read the sentence in your log again: `Timeout 15000ms exceeded`. Every word is true. And the reason it cost four days is that it is a fact about *your instruction*, dressed as a fact about *the world*.
+
+## Why a wait can only ever say no
+
+Here is the mechanism, and it is worth sitting with, because it is not specific to browsers.
+
+An `await` on a wait is a question with only one possible informative answer. You say: *tell me when this appears.* If it appears, you learn something real — it's here, and here it is. If it doesn't appear, you have not made an observation at all. You have failed to make one. And a failed observation looks the same from the inside no matter what caused it.
+
+Count the things that produce that identical message on that one line. The session expired and the page redirected. The markup changed and your selector genuinely is stale. The dashboard returned a maintenance page. The network stalled and the page never finished loading. Four distinct problems, four different fixes, one message.
+
+The <Term>async</Term> machinery is not hiding anything from you, either. A timeout is a <Term>promise</Term> that rejects on a timer; it has no channel through which the *reason* could arrive, because nothing on the other end is sending one. There is no bug to find in the timeout.
+
+And this is not a <Term>silent failure</Term> — the code shouted. That is what makes it so expensive. A silent failure at least leaves you suspicious of everything. A loud failure pointing confidently in one direction sends you off in that direction, and you go, because it is the only direction on offer.
+
+The retries made it worse. Retrying is a bet that a problem is temporary, and this one wasn't, so three attempts bought three identical rejections and a summary line reading `3 consecutive errors` — which is exactly what a flaky network looks like. The retry didn't merely fail to help. It put a permanent, knowable fault in the costume of an intermittent one.
+
+## Listening at one door
+
+You're expecting someone at seven. You stand in the hall by the front door and you listen.
+
+Seven comes and goes. At ten past, you conclude they aren't coming.
+
+But look at what you actually know, which is much narrower: *nobody knocked on the front door.* They might be stuck in traffic. They might be at the back door, because the front bell has been broken for a month. They might be on the step right now, texting you. The silence is identical in every one of those cases — and it is identical because silence isn't information about the world. It's the absence of information.
+
+Meanwhile there has been a fact available in the house for ten solid minutes. The back door has been rattling.
+
+Nobody collected it, because you put one person in the hall and gave them one instruction: listen at the front. When the front door stays quiet, that person can report only the quiet.
+
+So put someone at every door that anyone might realistically arrive at. Give each of them a name to call out. And when nobody comes to any of them, walk through the house before you write the note.
+
+Hold onto the house. The rest of this is where to stand people.
+
+## The four things you'll want to try first
+
+**"Raise the timeout."** Reasonable, and short timeouts really are a common bug — a dashboard that loads slowly on a bad morning produces this exact message, and fifteen seconds is not generous. It runs out on the thing that matters here: the sign-in page was never going to turn into the dashboard. Waiting longer for something that will never arrive changes how long you wait to learn nothing, and you pay that price once per item in the queue.
+
+**"Retry it."** Also right most of the time. Networks wobble, pages half-render, and a second attempt fixes a genuinely large share of automation failures. But a retry is a bet on impermanence, and when you lose that bet you don't just get the same failure — you get a *log line that lies about the category of the problem.* "Three consecutive errors" reads as instability. It was the single most misleading sentence in the file, and retrying is what wrote it.
+
+**"Catch it and log a better message."** Wrap the wait, catch the timeout, log "could not find the dashboard search box — check the selector". It's tidier, and it is a better sentence about the same non-observation. A `try/catch` here knows precisely what did not happen and absolutely nothing about what did. You will have made the wrong answer easier to read.
+
+**"Check where you are in the catch block."** This one is close, and half of it survives into the fix — reading the current address when the wait fails is exactly the missing move. On its own, though, it arrives late and expensive: you pay the entire timeout before you're allowed to ask the question, once per item, and after fifteen seconds the page may well have moved again, so the answer you finally get describes a moment that has passed. The question is right. The moment to ask it is *while you wait*, not after.
+
+## Watching every door at once
+
+```ts
+type Landing =
+  | { at: "ready" }
+  | { at: "signin" }
+  | { at: "unknown"; url: string };
+
+/** A watcher that loses stays quiet — a failed wait means "not this door". */
+function watch<T>(wait: Promise<unknown>, landing: T): Promise<T> {
+  return wait.then(
+    () => landing,
+    () => new Promise<T>(() => {}),
+  );
+}
+
+async function waitForDashboard(page: Page): Promise<Landing> {
+  // The clock in the hall. Only it may end the wait when nobody arrives.
+  const deadline = new Promise<Landing>((resolve) =>
+    setTimeout(() => resolve({ at: "unknown", url: page.url() }), 45_000),
+  );
+
+  return Promise.race([
+    watch(page.locator("[data-dashboard-root]").waitFor({ state: "visible" }), {
+      at: "ready",
+    } as const),
+    watch(page.waitForURL(/\/sign-in/), { at: "signin" } as const),
+    deadline,
+  ]);
+}
+```
+
+## Walking through it
+
+**`Landing` is the whole first idea.** The original wait handed back nothing, or threw; the tempting rewrite hands back `true` or `false`. Both throw away the only thing you were short of. A small <Term>union type</Term> with an `at` tag on every branch says *which* door opened, and because TypeScript does <Term>narrowing</Term> on that tag, `landing.url` exists only inside the branch where a URL means something. The caller can't read it on the happy path even by accident.
+
+**The line that saves you is `() => new Promise<T>(() => {})`.** It looks like a mistake — a promise built to never settle, ever. It is the person at the back door who hears nothing and says nothing.
+
+Write the obvious version instead and watch it break. If a losing watcher resolves to `false`, that is a *settled* promise, and `Promise.race` reports whichever promise settles first regardless of how it settled. So the sign-in watcher times out at second forty-five, resolves `false`, wins the race — and the dashboard, which was one second from rendering, never gets to speak. You have built a faster way to be confidently wrong. A watcher that loses must withdraw, not vote.
+
+**The deadline is the clock in the hall**, and the detail worth noticing is `page.url()` sitting *inside* the callback. It runs at the moment the timer fires, not when the timer was scheduled — so what you record is where the browser genuinely ended up after forty-five seconds, which is the walk through the house.
+
+**Then the caller, which is where the four days were actually lost:**
+
+```ts
+const landing = await waitForDashboard(page);
+
+if (landing.at === "signin") {
+  log("session expired — sign in once by hand, then re-run");
+  return;
+}
+if (landing.at === "unknown") {
+  log(`dashboard never rendered at ${landing.url} — selector has likely changed`);
+  return;
+}
+```
+
+Two branches, two different mornings. One sends you to a password field for thirty seconds. The other sends you to the markup — which was, all along, a perfectly good guess. It was just never the *only* guess, and the old log had no way to say so.
+
+<Callout type="warning" title="A promise that never settles is a small leak">
+
+Nothing ever resolves the losing watcher, so it — and whatever it closed over — stays in memory until the process ends. In a script that runs for ninety seconds and exits, that is free. In a long-lived server doing this on every request, it is not: give the waiters an `AbortSignal` and cancel the losers once the race is decided.
+
+</Callout>
+
+## The two paths
+
+```
+                        page.goto(dashboard)
+                                 |
+             +-------------------+-------------------+
+       session valid                          session expired
+             |                                       |
+      dashboard renders                    redirect to /sign-in
+             |                                       |
+   ONE WATCHER  ("wait for the search box")
+             |                                       |
+      found in 1.2s                        15s -> TimeoutError
+      -> proceed                           -> "Timeout exceeded" x3
+                                           -> "3 consecutive errors"
+                                           -> you go and read markup
+
+   MANY WATCHERS  ("wait for whichever of these happens")
+             |                                       |
+      { at: "ready" }                      { at: "signin" }
+      -> proceed                           -> "session expired, sign in"
+```
+
+Read the two right-hand columns against each other. The underlying situation is the same in both — same expired session, same redirect, same page on screen. Nothing about the world changed between them. What changed is how many outcomes the code was prepared to recognise, and that alone is the difference between a log line that sends you to the markup and a log line that sends you to the password field. The fact was on the screen the entire time. Only one version of the code had anybody watching the door it came through.
+
+## Where this bites in real life
+
+**Polling a job for the status you want.** You kick off an import and poll every ten seconds until the status reads `complete`, giving up after ten minutes. The import fails at twenty seconds. Your code polls it another fifty-eight times, then reports a ten-minute timeout — while every single response it read carried `failed` and a perfectly good error message. Wait for any *terminal* state, not the one you're hoping for.
+
+**Retrying a permanent rejection.** A request comes back `401`. Your client sees "the request failed" and retries three times with a backoff, so a single expired credential turns into a slow, noisy, three-attempt outage that looks like a network problem in the graphs. A <Term>status code</Term> is the server telling you which door it answered; a retry loop that only checks whether the call succeeded throws that away. Retries are for outcomes that might change on their own. An expired credential will not fix itself.
+
+**End-to-end tests that only know the happy selector.** The test waits for the results table. The app renders an error banner instead — one that says, in plain words, what went wrong. CI reports "timed out waiting for the results table", so the next hour goes on selectors and flakiness. Wait for the table *or* the banner, and the failure names itself in the first two seconds.
+
+## Try this tonight
+
+Open a scratch file. Ten minutes, no project needed.
+
+```ts
+function slow(ms: number, value: string): Promise<string> {
+  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+}
+function fails(ms: number): Promise<string> {
+  return new Promise((_, reject) => setTimeout(() => reject(new Error("nope")), ms));
+}
+function quiet<T>(p: Promise<T>): Promise<T> {
+  return p.catch(() => new Promise<T>(() => {}));
+}
+
+Promise.race([fails(100), slow(300, "back door")])
+  .then((v) => console.log("A:", v))
+  .catch((e) => console.log("A: threw", e.message));
+
+Promise.race([quiet(fails(100)), slow(300, "back door")])
+  .then((v) => console.log("B:", v));
+```
+
+Write down what A prints and what B prints before you run it. They differ by one word, and the word decides whether a watcher that gave up early is allowed to answer for the watcher that was about to succeed.
+
+Then a second prediction, which is the more interesting one: change B's second argument to `quiet(fails(200))` so that *both* watchers fail quietly, and say what the program does. Run it and see how it behaves. That is precisely the hole the deadline in the fix exists to fill — and the reason the clock in the hall is not optional.
+
+<Quiz>
+  <Question q="Your test times out waiting for a results table. What does that timeout actually establish?">
+    Only that the results table did not become visible inside the window you allowed. It establishes nothing about the cause — an expired session, a changed selector, an error banner rendered in the table's place and a stalled network all produce the identical message. The timeout is a fact about the instruction you gave, not about the state of the page.
+  </Question>
+  <Question q="You race two waiters and turn each failed wait into a resolved false. Why can that hand back the wrong answer?">
+    Because a race reports whichever promise settles first, and resolving to false is settling. If one waiter gives up at second forty-five while the other would have succeeded at second forty-six, the give-up wins and the race reports failure for a page that was about to load. A losing watcher has to withdraw rather than vote, which is why the helper turns a failed wait into a promise that never settles — and why one explicit deadline is then required to end the race when genuinely nobody arrives.
+  </Question>
+  <Question q="A job polls an API every ten seconds for a status of complete and gives up after ten minutes. The job failed after twenty seconds. What gets reported, and what should the code have waited for?">
+    It reports a ten-minute timeout, having read a failure status fifty-eight times without acting on it. The code should wait for any terminal state — complete or failed or cancelled — and branch on which one arrived. Waiting for only the outcome you want converts every other outcome into the same uninformative silence, and throws away an error message the server was handing you the whole time.
+  </Question>
+</Quiz>
+
+<Takeaway>
+A timeout only tells you what did not happen — so wait on every outcome you could land in, and let the code tell you what did. Give each one a name, make a watcher that loses go quiet rather than answer for the others, and when the clock finally runs out, read where you actually are before you write the log line.
+</Takeaway>
