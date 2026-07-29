@@ -1,0 +1,259 @@
+---
+title: "You Allowed the Script In, Not the Message Out"
+slug: "allowed-the-script-not-the-message"
+publishedAt: "2026-07-29"
+summary: "An analytics dashboard reads zero visitors for three weeks while the server logs show real traffic. The script is on the page, the site works, every gate is green. The security header let the script load and then quietly refused every measurement it tried to send."
+sourceProject: "Public marketing site with lead-capture forms"
+language: "TypeScript"
+difficulty: "intermediate"
+estimatedMinutes: 8
+topics:
+  - "Web security"
+  - "HTTP headers"
+  - "Browsers"
+  - "Analytics"
+  - "Debugging"
+concepts:
+  - "Content Security Policy"
+  - "Loading versus connecting"
+  - "default-src is only a fallback"
+  - "Blocked is not broken"
+  - "Report-only mode"
+originKind: "recent-change"
+sequence: 6
+sourceFingerprint: "3d1f8b60c47ae2915d0b76fa"
+relatedSlugs:
+  - "green-because-nothing-was-there"
+  - "which-way-does-your-guard-fail"
+---
+
+<InBrief principle="Letting code load says nothing about where it may send data — every capability keeps its own list, and a refused send makes no sound your team will ever hear.">
+
+A Content Security Policy is a <Term>header</Term> your server sends telling the browser which origins the page may use, split by *what for*. Fetching and running a script is one permission. Sending data out of the page is a different permission, on a different line, with its own list of origins. Add a third-party analytics origin to the script line only, and the script arrives, runs, and then has every measurement it posts refused at the door. Nothing crashes. The page renders exactly as before.
+
+The reason it costs weeks rather than minutes is that a blocked request is not a failed request. It never leaves the browser, so your server logs are empty, the vendor's logs are empty, and your status codes are all fine. The only record is one line in the console of a visitor's browser — a place none of your gates is standing.
+
+Two rules save you. First, treat every third-party origin as two origins until proven otherwise: the host that serves the code, and the host that receives what the code measures. Second, know that the catch-all line is only a fallback — the moment you spell out a specific permission, the catch-all stops applying to it, so adding an origin there fixes nothing and feels like it should.
+
+</InBrief>
+
+## The dashboard that says nobody has ever visited
+
+It is a Wednesday. The site went live three weeks ago and you have been checking on it the way you check on anything new — a look at the forms, a look at the error tracker, a look at the analytics.
+
+The analytics say zero.
+
+Not zero today. Zero on every single day since launch, a flat line lying along the bottom of the chart like the site was never deployed. Which it obviously was, because the server logs behind it are full: real requests, real pages, real form submissions from real people who found the thing and filled it in.
+
+So you do the sensible first thing and check that the tracking script is actually on the page. View source, search, and there it is, right where the platform injects it, on every response. Fine. So the vendor is broken, or the site identifier is wrong, or the account is misconfigured, and you start composing the support message in your head.
+
+Before sending it you open the page in a browser and press F12, mostly to have a screenshot to attach.
+
+```
+Refused to load the script 'https://static.example.com/beacon.js' because it
+violates the following Content Security Policy directive: "script-src 'self'
+'unsafe-inline'".
+```
+
+There it is, in red, on every page load, for three weeks. Your own site has been refusing to run the analytics you installed.
+
+That part takes two minutes to fix. You add the vendor's host to the script line, deploy, reload, and the red line is gone. Clean console. You go back to the dashboard the next morning expecting a number.
+
+It still says zero.
+
+## The line the browser had been printing all along
+
+Open the console again and scroll. The old error is genuinely gone. Underneath it, where it had been sitting the whole time, hidden behind the louder one, is a second red line you had never seen:
+
+```
+Refused to connect to 'https://metrics.example.com/collect' because it violates
+the following Content Security Policy directive: "connect-src 'self'
+https://api.example.com".
+```
+
+Read the two messages next to each other, because the whole lesson is in the difference between the verbs. The first said *refused to load*. The second says *refused to connect*.
+
+Those are two separate permissions. The first one governs which code the browser is willing to fetch and run on your page. The second governs where anything already running on your page is allowed to send data. They are checked at different moments, against different lists, and one has no opinion whatsoever about the other.
+
+So the script is now allowed in. It downloads, it runs, it does its job, it works out that somebody just loaded the home page — and then it tries to post that measurement to the vendor's collection <Term>endpoint</Term>, and the browser stops the request before it goes anywhere.
+
+The vendor's script and the vendor's collector are on two different hosts. Almost every analytics product, tag manager, error tracker and session recorder is built this way, because the file you download is served from a static content network and the thing that receives millions of tiny writes is a different service entirely. One <Term>dependency</Term>, two origins, and you only ever thought about one of them.
+
+## Why a blocked request is quieter than a broken one
+
+Now the part worth sitting with, because it explains three weeks rather than three minutes.
+
+A request that fails is still a request. It goes out, something answers badly or nothing answers at all, and there are traces of it everywhere: a <Term>status code</Term> in an access log, a red row in the network panel, a timeout in a metric, a rejected promise your code could catch.
+
+A request that a policy refuses is none of those things. The browser evaluates it against the header *before dispatch* and then simply does not make it. No packet leaves the machine. Your server never sees it — it was never addressed to your server. The vendor never sees it, which is why their support team would have told you, correctly, that your account has received no data. There is nothing to catch, because from the running code's point of view a beacon is fire-and-forget and it has no idea the fire never lit.
+
+This is why it survives every gate you own. The typecheck passes: no types are involved. The tests pass: they never ran a browser, and the analytics vendor was stubbed out anyway. The <Term>build</Term> passes. The page returns <Term of="200 ok">200 OK</Term> and renders perfectly at every width, so a screenshot proves nothing but the layout. Uptime is green. This is a <Term>silent failure</Term> of a particularly complete kind — the only witness is a console message printed inside a stranger's browser, and then thrown away when they close the tab.
+
+Which is also the fix for the *class* of problem rather than this one instance: something of yours has to open a real browser, load the real pages, and read the real console. A gate that never looks at a console cannot see anything that only says its piece there.
+
+## One list per errand
+
+Picture a company with a receiving bay at the back and a postroom at the front.
+
+The receiving bay has a clipboard: the suppliers whose deliveries may come in. You wanted a machine that counts footfall, so you added that supplier's name to the clipboard, and the crate came through, and the machine was unpacked and switched on and it hums away quite happily in the corner.
+
+The postroom has its own clipboard, listing the addresses this company is permitted to send things to. Nobody thought to add anything to it, because the postroom was never part of the conversation — you were thinking about getting the machine *in*.
+
+So every hour the machine prints a slip with a count on it and drops it in the outbound tray. The postroom clerk picks it up, checks the address against their clipboard, does not find it, and drops it in the bin. Then they write one line in a ledger that sits on a shelf in the postroom, in a room nobody from your team has ever had a reason to walk into.
+
+The machine keeps humming. It has no way of knowing. It prints another slip. Meanwhile the person who ordered it is staring at a report that says the footfall counter has counted nobody for three weeks, and reasonably concludes that the machine is faulty.
+
+Two clipboards. Two clerks. No conversation between them. Hold onto that, because the rest of this is really just: where else is there a clipboard, and did you write the address on the right one.
+
+## The four things you'll want to try first
+
+**"Put the origin in the catch-all line and be done with it."** Every policy starts with a line that reads like a default for everything, so the obvious move is to add the vendor there and let it cover both the loading and the sending. This is the trap, and it is a good one, because it produces a change that looks completely correct and does nothing at all. That line is a *fallback*, not a base layer. It is consulted only for permissions you did not spell out. The moment your policy contains its own line for connections, the fallback stops being consulted for connections entirely — so you can name the vendor in the catch-all, deploy it, read the diff back, and still have exactly the same block. You will be certain you fixed it.
+
+**"Use a wildcard so the subdomains are covered."** Sensible instinct: name the domain with a star in front and stop playing whack-a-mole with hostnames. It buys you less than you think and costs more than you meant. A host wildcard matches subdomains but *not* the bare domain itself — and the split you are dealing with is very often a subdomain serving the script and the bare domain taking the beacon, which is precisely the one case the wildcard does not cover. Meanwhile you have handed permission to every subdomain that vendor will ever create, which is the opposite of the reason you wrote a policy.
+
+**"Take the header off — it's a marketing site, there's nothing to protect."** Genuinely tempting at 6pm. No logins, no dashboard, no customer data on the page. But that same header is doing two jobs that have nothing to do with analytics: one line stops any other site putting yours inside a frame, and another stops your form posting anywhere except your own origin. Both of those exist because there is a lead-capture form on the page, and a form that can be framed and re-pointed is a form somebody else can harvest. You would be trading two real protections to avoid typing one hostname.
+
+**"Switch it to report-only until it's right."** This one is half of the actual answer and worth reaching for. There is a second, non-enforcing version of the header that blocks nothing and reports everything, which is the correct tool for discovering what a policy would break before it breaks it. Where it runs out is that a policy in report-only is a policy you do not have, and the deploy that promotes it to enforcing is the one that never quite gets scheduled. Use it to build the list, in the same change that promotes it.
+
+## Naming the origin twice
+
+```ts
+// One vendor is usually two origins: the host that serves the code, and the
+// host that receives what the code measures. Name them separately so the
+// next person can see there are two.
+const METRICS_SCRIPT = "https://static.example.com";
+const METRICS_BEACON = "https://example.com";
+
+const DIRECTIVES = [
+  // A fallback, not a base layer. It applies ONLY to permissions that are
+  // not spelled out below, so adding an origin here changes nothing for
+  // any line that follows.
+  "default-src 'self'",
+
+  // What is allowed to run on this page.
+  `script-src 'self' ${METRICS_SCRIPT}`,
+
+  // Where anything already running is allowed to send data. Writing this
+  // line at all replaces the fallback for sending, so every origin the
+  // page talks to has to be repeated here.
+  `connect-src 'self' https://api.example.com ${METRICS_BEACON}`,
+
+  "img-src 'self' data:",
+  "font-src 'self'",
+
+  // Nothing to do with analytics, and the reason you never delete the
+  // whole header to make one origin work.
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "object-src 'none'",
+];
+
+export const CONTENT_SECURITY_POLICY = DIRECTIVES.join("; ");
+```
+
+Attach that string to every response as the policy header, wherever your framework sets headers. It is one value, built once, applied to everything.
+
+## Walking through it
+
+**Two constants, on purpose.** They could easily have been one string. Splitting them is the only part of this file that teaches the next person anything: it says out loud that this vendor has a delivery address *and* a return address, and that the two are not the same. The version where both hosts are buried inside one long template string is the version where somebody adds a second vendor next month and repeats the whole bug.
+
+**The line that does the damage is the third one, and it does it by being written at all.** Once `connect-src` exists in the policy, `default-src` has no say over connections — not a reduced say, none. This catches people who inherit a policy rather than write one, because the inherited version already spells out four or five permissions, and the mental model of "the first line is the base, the rest add to it" is wrong in a way that never produces an error message. If you remember one mechanical fact from this lesson, make it that one.
+
+**`'self'` is on nearly every line, and not one of them is redundant.** It means this exact origin — same scheme, same host, same port. You have to repeat it wherever you still want your own assets to work, because the moment you write a line, you are writing the *complete* list for that permission, not an addition to something that already exists.
+
+**The bottom three lines are the argument against the shortcut.** `frame-ancestors 'none'` refuses to let any other page put yours in a frame. `form-action 'self'` refuses to let a form post anywhere but your origin. Neither one falls back to the catch-all — they are always explicit or absent — and neither has anything to do with the analytics problem. They are simply riding in the same header, which is why "delete the header" is never the small change it appears to be.
+
+<Callout type="warning" title="The meta-tag version is not the same header">
+
+You can also deliver this policy from a tag in the document head, and in a static site that is sometimes the only option. Be aware that the tag form ignores several directives outright — including `frame-ancestors` and the reporting ones — so a policy that reads identically can be doing materially less. When you have a server or an edge layer that can set a real response header, set it there.
+
+</Callout>
+
+## The two paths
+
+```
+   a visitor loads a page
+            |
+            +--> fetch the vendor's script ....... checked against script-src
+            |
+            +--> run it .......................... it is a script now
+            |
+            +--> POST the measurement ............ checked against connect-src
+
+
+   ORIGIN NAMED ON THE SCRIPT LINE ONLY
+        script fetched ....... ok
+        script runs .......... ok
+        measurement sent ..... REFUSED, before it leaves the browser
+        server log ........... nothing to see, request never existed
+        vendor's log ......... nothing to see, request never arrived
+        the page ............. renders perfectly
+        the dashboard ........ 0 visitors, three weeks running
+
+
+   ORIGIN NAMED ON BOTH LINES
+        script fetched ....... ok
+        script runs .......... ok
+        measurement sent ..... delivered
+        server log ........... unchanged
+        vendor's log ......... rows appear
+        the page ............. renders perfectly
+        the dashboard ........ real numbers
+```
+
+Look at the two blocks and notice how few lines differ. The page renders perfectly in both. Your server behaves identically in both — it is not involved at any point, which is exactly why nothing of yours noticed. Every fact that separates the broken column from the working one lives inside somebody else's browser for the length of one visit, and then is gone. That is the whole reason this bug is measured in weeks: not because it is subtle, but because the only place it is visible is the one place nothing was watching.
+
+## Where this bites in real life
+
+**Presigned uploads that fail only in production.** You add file uploads to an admin tool. The browser asks your API for a short-lived upload URL, gets one, and then uploads the file straight to the storage service. It works perfectly on your machine, where you are running without the policy, and every upload hangs in production, where the storage host was never added to the sending line. The API is healthy, the URL is valid, the file is fine. This is the same bug wearing a different coat: you allowed the conversation that fetched the address and forgot the one that used it.
+
+**A vendor quietly adds a region.** The policy was correct for a year. Then the analytics provider starts routing some visitors to a per-country collection host, and now a slice of your traffic — the slice geographically furthest from you, so the slice least likely to be you — silently stops being counted. Nobody changed anything on your side, which is why nobody looks on your side. Your numbers drift down and it reads like a marketing problem. It is a <Term>regression</Term> introduced by a third party, and the only early warning is somebody collecting the violation reports.
+
+**The development-only escape hatch that ships.** Local tooling needs permissions production does not, so somebody relaxes the policy behind an <Term>environment variable</Term> check. That is a reasonable pattern. It becomes an incident when the check is written against a variable that is unset in the deployed image, so the loosened branch is what the world gets. A relaxation gated on `process.env.NODE_ENV` is only as trustworthy as your certainty about what that value actually is at <Term>runtime</Term> — and it is the kind of <Term>edge case</Term> nobody re-tests once it works locally.
+
+## Try this tonight
+
+Ten minutes, one file, no project. Save this as `csp.html` in an empty folder.
+
+```html
+<!doctype html>
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self' 'unsafe-inline' https://example.com">
+<script>
+  // Every block fires this event. It is how you catch them without a human
+  // sitting in front of the console.
+  document.addEventListener("securitypolicyviolation", (e) => {
+    console.log("BLOCKED:", e.violatedDirective, "->", e.blockedURI);
+  });
+
+  // no-cors keeps CORS out of the experiment. The policy is checked first
+  // either way, so a block here is definitely the policy.
+  fetch("https://example.com", { mode: "no-cors" })
+    .then(() => console.log("send: allowed"))
+    .catch((err) => console.log("send: blocked -", err.message));
+</script>
+```
+
+Serve the folder with `npx serve .` and open `http://localhost:3000/csp.html` with the console showing. Opening the file directly from disk gives you a strange origin and a confusing result, so use the server.
+
+**Predict before you run it.** The policy has exactly one line, and it names the destination. Does the send go through?
+
+Then make one edit: append `; connect-src 'self'` to the content attribute, so the policy has two lines. The destination is *still named* on the first line and is *not* named on the second.
+
+**Predict again before reloading.** Say out loud whether the send now succeeds, and why. If you can explain that second result to yourself in one sentence, you will never lose an afternoon to this — and the sentence you will have said is the one that took three weeks to find.
+
+<Quiz>
+  <Question q="Your policy already spells out a line for connections. You add a new analytics origin to the catch-all line and deploy. What changes?">
+    Nothing. The catch-all is a fallback consulted only for permissions the policy does not spell out, so once a connection line exists, the catch-all has no say over connections at all. The origin has to be added to the connection line itself. This is the version of the fix that reads correctly in a diff, passes review, and blocks exactly as much as before.
+  </Question>
+  <Question q="A third-party script loads with no console error but nothing is ever recorded on the vendor's side. Why is there nothing in your server logs, and where do you look instead?">
+    Because the browser evaluates the request against the policy before dispatching it, so no request is ever made. Your server was never the destination, and the vendor never received anything, so neither side has a trace. The only record is a console message in the visitor's browser, plus a securitypolicyviolation event you could listen for. Load the real pages in a real browser and read the console, or collect the violation reports.
+  </Question>
+  <Question q="Why is a subdomain wildcard not enough for a vendor whose script is on a subdomain and whose collector is on the bare domain?">
+    A host wildcard matches subdomains but not the bare domain, so the collector stays blocked while the script loads fine — the exact split that produces a script running happily and reporting nothing. Both hosts need naming, on the lines that govern their respective jobs. The wildcard also grants every future subdomain that vendor creates, which gives away more than the specific entry would have.
+  </Question>
+</Quiz>
+
+<Takeaway>
+Letting code load says nothing about where it may send data — every capability keeps its own list, and a refused send makes no sound your team will ever hear. Treat each third-party as two origins until proven otherwise, remember that the catch-all line stops applying the moment you spell a permission out, and put something in front of a real browser console, because that is the only room the refusal is announced in.
+</Takeaway>
