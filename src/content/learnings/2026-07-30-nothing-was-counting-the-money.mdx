@@ -1,0 +1,276 @@
+---
+title: "Nothing in Your API Was Counting the Money"
+slug: "nothing-was-counting-the-money"
+publishedAt: "2026-07-30"
+summary: "A request cap sits in front of your form and holds beautifully. Every log line is a success, every dashboard is green, and the first thing that ever adds up what you spent is the invoice that lands three weeks later. One accepted request was never one billable action."
+sourceProject: "Internal API behind a public lead-capture form"
+language: "TypeScript"
+difficulty: "intermediate"
+estimatedMinutes: 8
+topics:
+  - "APIs"
+  - "Reliability"
+  - "Cost control"
+  - "Databases"
+  - "Observability"
+concepts:
+  - "Metering the effect, not the entrance"
+  - "Fan-out cost"
+  - "Observe mode before enforcement"
+  - "Atomic counters"
+  - "Business-day buckets"
+originKind: "recent-change"
+sequence: 7
+sourceFingerprint: "9c4e17b3f5a208d6c1b74e30"
+relatedSlugs:
+  - "which-way-does-your-guard-fail"
+  - "green-because-nothing-was-there"
+---
+
+<InBrief principle="A request cap counts the door — put a counter on the thing that actually costs money, and let it watch for a while before it is allowed to stop anything.">
+
+Almost every cost control developers reach for counts *arrivals*: so many requests per minute, per address, per key. But one accepted request rarely costs one unit of money. It fans out. A submission arrives and your code makes a model call, texts the customer, emails the customer, then texts and emails every teammate on the notification list. Seven billable actions from one request that your <Term>rate limit</Term> recorded, correctly, as one.
+
+Nothing in the codebase holds that total. Each channel lives in its own module, each send is individually reasonable, each returns success. The only system that ever adds them together belongs to the vendor, and it reports monthly, in the form of a bill. That is why this is expensive rather than annoying: the feedback loop is weeks long and it terminates in an accounts inbox rather than an alert.
+
+The fix is to put one counter on the *effect* instead of the entrance. Find the single function every send of a kind passes through, count there against a per-day ceiling keyed to your business day, and increment it with one statement that returns the new total so concurrent sends cannot read the same number. Count after the early returns that mean nothing will actually be sent, or you will meter attempts rather than money.
+
+Then — and this is the part that gets skipped — ship it switched off. A ceiling you guessed is a switch that silently suppresses real customer messages on your busiest day. Let it count and warn and block nothing until the logs show what a normal day looks like, and make enforcement a deliberate flip of a setting, in daylight, against real numbers.
+
+</InBrief>
+
+## The number at the bottom of the invoice
+
+It is the third of the month and you are not thinking about the API at all. Then a message arrives from whoever pays the bills, with a screenshot attached, and one line highlighted.
+
+```
+Messaging — outbound SMS      4,812 segments      billed
+```
+
+You read it twice. The form behind that number took eighty or so submissions all month. Eighty. You know that figure because it is on the dashboard you built, on a chart you have looked at every week, and it has never once been interesting.
+
+So you go looking for the breach. Nothing in the request logs looks unusual — no burst, no strange path, no run of <Term of="400">400s</Term>. The rate limit is where you left it, and its counters agree with the dashboard: a normal month, a few dozen accepted submissions, nobody anywhere near the cap. Uptime is green. Error tracking is quiet. Not one thing you built to watch this service noticed anything at all.
+
+You start reading the code path for a single submission instead, top to bottom, and count out loud as you go.
+
+A model call to score the lead. That is one. A confirmation text to the person who filled it in — two. A confirmation email — three. Then the team notification, which loops over the notify list and sends each person a text and an email. Three people are on that list today. Six more.
+
+Nine billable actions. One request.
+
+Eighty submissions was never eighty of anything. And once you know the shape, the arithmetic stops being reassuring: the notify list is a table anyone in the dashboard can add a row to, so the multiplier is not even a constant. Somebody added two colleagues in the spring. Nothing about that change looked like a spending decision.
+
+## The number that existed nowhere
+
+Here is the thing worth sitting with. It is not that the number was wrong. It is that the number did not exist.
+
+Search the whole service for a total. The rate limiter holds requests per window, and throws each window away. The message table holds one row per send, which is a record and not a running figure — a count over it would be a query nobody has ever written. The email logger holds its own rows, in its own table, with its own status vocabulary. The model client holds nothing.
+
+Every one of those is a faithful account of one channel. Not one of them can answer "how much did today cost", because none of them can see the others, and cost is the only thing that adds across them.
+
+This is the difference between counting the entrance and counting the effect, and it is worth naming carefully because the two feel like the same activity. A request cap is a statement about the *ways in*: this path, this caller, this window. To make it protect your budget you have to enumerate every way in — the public form, the resend button on the dashboard, the scheduled follow-up sweep, the one internal script somebody wrote in March — and then keep that enumeration correct forever while other people add features.
+
+A spend counter is a statement about the *way out*. There are only three of those, and they are three functions you can point at. It does not care which door the work came through, which is exactly what makes it hold when a door you forgot about opens.
+
+## Why every gate you own said yes
+
+Nothing failed, and that is the whole mechanism.
+
+A send that costs you money is, from the code's point of view, a success. The provider returns <Term of="200 ok">200 OK</Term>. The row is written with status `sent`. There is no <Term>exception</Term> to catch, no red line to page on, no retry to notice. Multiply a success by five thousand and every individual observation is still a success. The pathology only appears in the sum, and you never took the sum.
+
+Then there is where the sum lives. Your provider knows exactly what it charged you, to the cent, in real time. That number sits in someone else's system, behind someone else's login, and arrives at your company on a monthly cycle through a channel — accounts payable — that has never had a way to reach an engineer quickly. Your <Term>silent failure</Term> is not silent to everyone. It is loud in a room you do not sit in.
+
+And the gates that would catch almost anything else are structurally blind here. A typecheck cannot count. Tests stub the providers out, which is correct, and means the suite is measuring a world where sends are free. Uptime checks confirm the service answers. Every one of those is doing its job. None of them is a job that involves adding up money.
+
+## A meter on the mains
+
+Picture the plumbing in a building.
+
+There is a bouncer on the front door and he is excellent. He counts people in, he turns away anyone arriving too fast, and his tally at the end of the night is exactly right. Forty people came in. He can prove it.
+
+The bill on the desk in the morning is for water.
+
+Because each of those forty people walked in and turned on taps. Some of them ran a bath. Somebody left a hose going in the yard, and there is a tap in a back room the bouncer does not know exists, because it was fitted after he was hired. His tally is honest and complete and describes the wrong quantity entirely. There is no arrangement of headcount that tells you about water.
+
+So you do not hire a second bouncer. You fit a meter on the mains — the single pipe everything downstream of it has to pass through — and now the tap in the back room is counted, and so is the one that gets fitted next year, without anyone telling the meter it exists.
+
+Two more things about that meter, and they are the ones people skip.
+
+You read it for a month before you fit an automatic shutoff valve, because a valve set from a guess is a building with no water on the day of the party. And you make sure the meter is on the pipe rather than on the handle: a tap that is turned but not connected to anything moves no water, and must not tick the meter, or you will one day shut off a building because of water that was never delivered.
+
+Hold onto the meter on the mains. Everything below is that.
+
+## The four things you'll want to try first
+
+**"Tighten the rate limit."** The most natural move in the world, because it is the control you already own and it takes one line. It does help — a cap that lets fewer requests through does mean less spend, in the same way that a smaller front door means less water. But the relationship between the two is a multiplier that lives somewhere else in the codebase and changes when a colleague adds themselves to a notification list. You cannot set a request cap that means anything in money without holding the fan-out in your head, and the fan-out is precisely the thing nobody is holding. It also has the enumeration problem: every new path in needs the same protection remembering.
+
+**"Add a dedup key so the same lead can't fire twice."** This is a genuinely good control and you should have it. Give each send a key derived from what it is, refuse to send twice for the same key, and retries and double-clicks and a re-run of yesterday's sweep all stop costing you. Where it runs out is that it defends against *repeats of one thing*, and a caller who wants to spend your money simply sends different things. A fresh address in each submission is a new record every time, so every send is legitimately the first one for its key, and the <Term>guard</Term> waves all of them through while working perfectly.
+
+**"Turn on billing alerts at the provider."** Right instinct — go where the money is known. Two problems. The first is scope: each provider knows its own spend, so three vendors means three thresholds and no total, and the interesting number is the total. The second is that an alert is a message, not a valve. It arrives after the spending, it usually arrives on a daily or slower cycle, and it cannot suppress anything. Worth having as a backstop. Not a control.
+
+**"Put a hard cap in and block anything over it."** The most responsible-sounding option and the one most likely to hurt you, because to write it you must first know what a normal day looks like, and right now you do not. Pick a ceiling from a feeling and you have built a switch that silently stops customer confirmations and team alerts on your best sales day of the year — a failure that looks exactly like nothing happening, and gets discovered the way this one did. The cap is the destination. It is not the first move.
+
+## Fitting the meter
+
+```ts
+type Channel = "sms" | "email" | "model";
+
+type Reading = {
+  usedToday: number;
+  ceiling: number;
+  /** Only ever true once enforcement is deliberately switched on. */
+  stop: boolean;
+};
+
+// bump() adds one and hands back the NEW total for that (day, key) pair, in a
+// single round trip. Two sends arriving together get two different numbers.
+type Counters = { bump(day: string, key: string): Promise<number> };
+
+const dayKey = (now: Date, timeZone = "America/Los_Angeles") =>
+  new Intl.DateTimeFormat("en-CA", { timeZone }).format(now);
+
+export async function meter(
+  channel: Channel,
+  ceiling: number,
+  enforcing: boolean,
+  counters: Counters,
+): Promise<Reading> {
+  try {
+    const usedToday = await counters.bump(dayKey(new Date()), `outbound:${channel}`);
+    const over = usedToday > ceiling;
+    if (over) {
+      const mode = enforcing ? "STOPPING this send" : "observe mode, send allowed";
+      console.warn(`[meter] ${channel} at ${usedToday} of ${ceiling} today - ${mode}`);
+    }
+    return { usedToday, ceiling, stop: over && enforcing };
+  } catch (err) {
+    // The counter breaking must never be the reason a real customer message
+    // does not go out. Complain loudly, then get out of the way.
+    console.error(`[meter] counter unavailable for ${channel} - allowing`, err);
+    return { usedToday: 0, ceiling, stop: false };
+  }
+}
+```
+
+## Walking through it
+
+**`bump` is one method, and that is the entire storage design.** A day, a key, a number that goes up. It can live in a two-column table you already have, because a bucket name is just a string, so this needs no new schema and no migration. What it must not be is a read followed by a write:
+
+```sql
+INSERT INTO daily_counters (day, bucket, count)
+VALUES ($1, $2, 1)
+ON CONFLICT (day, bucket) DO UPDATE SET count = daily_counters.count + 1
+RETURNING count
+```
+
+One statement that both increments and returns. Fetch the row, add one in your program, write it back, and twenty simultaneous sends can all read the same number and all write the same number — losing nineteen of them during precisely the burst you built this to catch.
+
+**The day key is a calendar day in the business timezone, not a timestamp.** Working in whole day strings sidesteps the range-comparison bug that eats afternoons — no start-of-day, no end-of-day, no question about which side is inclusive. Two sends belong to the same day when their day strings match, and that is the whole comparison. Getting the zone right matters for a duller reason: if the bucket rolls over at midnight somewhere else, your ceiling resets in the middle of a working afternoon and the warning line lands on a date nobody recognises.
+
+**The one line that decides everything is `stop: over && enforcing`.** Being over the ceiling and stopping because of it are two different facts, and the whole design is that they arrive separately. In observe mode the meter counts, notices, warns and returns `stop: false`, so behaviour is byte-for-byte what it was yesterday while the log fills up with the shape of your real traffic. Flipping enforcement is then one setting change made by someone reading actual numbers, rather than a guess baked in at three in the morning.
+
+**The `catch` block chooses availability over protection, on purpose.** If the counter is unreachable the send goes out. That is a real trade and the wrong one for some systems — a payment authoriser should refuse — but this meter guards a budget while sitting in front of customer confirmations and lead alerts, and a database hiccup that swallows a sales notification costs more than the spend it saved. That choice is a <Term>fail open</Term>, it belongs in a comment, and it should be an explicit decision rather than the accident of where you put the `try`. Deciding it the other way is <Term>fail closed</Term>.
+
+**Where you call it decides whether it measures money.** At the call site the shape is: return early on everything that means no send will happen, *then* meter, then act on the reading.
+
+```ts
+if (!provider.isConfigured()) return logSkipped(input, "no credentials");
+const reading = await meter("email", ceilings.email, ENFORCING, counters);
+if (reading.stop) return logSkipped(input, "daily-ceiling");
+await provider.send(input);
+```
+
+Note that the suppressed case still writes a row, with a reason. A message that was deliberately not sent has to be distinguishable from one that was never attempted, or you have swapped an invisible spend for an invisible silence.
+
+## The two paths
+
+```
+   ONE SUBMISSION, COUNTED AT THE DOOR
+
+      request accepted ......... rate limit says 1 of 60 this minute, fine
+      score the lead ........... $   counted by nobody
+      text the customer ........ $   counted by nobody
+      email the customer ....... $   counted by nobody
+      text 3 teammates ......... $$$ counted by nobody
+      email 3 teammates ........ $$$ counted by nobody
+      every send returns ....... 200 OK, status "sent"
+      today's total ............ does not exist anywhere
+      first system to add up ... the vendor, on the 3rd of next month
+
+
+   ONE SUBMISSION, COUNTED AT THE MAINS
+
+      request accepted ......... rate limit says 1 of 60 this minute, fine
+      score the lead ........... $   meter: model 41
+      text the customer ........ $   meter: sms 88
+      email the customer ....... $   meter: email 96
+      text 3 teammates ......... $$$ meter: sms 91
+      email 3 teammates ........ $$$ meter: email 99
+      every send returns ....... 200 OK, status "sent"
+      today's total ............ three numbers, readable at any moment
+      first system to add up ... yours, one warning line, the same hour
+```
+
+The two columns describe identical behaviour. Same sends, same statuses, same customer experience, same bill on that particular day — the meter in observe mode changes nothing about what happens. The only difference is that a number exists. That is worth staring at, because it is the general shape of every observability problem you will ever have: the failure was never that the system did the wrong thing, it was that the quantity you care about was not represented anywhere, and a quantity nobody represents cannot be alerted on, graphed, capped, or argued about.
+
+## Where this bites in real life
+
+**The meter that counts attempts instead of sends.** Mail credentials go missing for a couple of hours — a rotated password, a key that expired quietly — and the send function does exactly the right thing: it records a skip and returns without contacting anyone. If the counter ticks before that early return, every one of those non-sends still eats a unit of the day's ceiling. Nothing was delivered and the budget was spent anyway. Put the credentials back, and with enforcement on those phantom units suppress the real messages that follow. The meter belongs on the pipe, after every branch that means no water flows.
+
+**A misconfigured ceiling that reads as zero.** The limit comes from an <Term>environment variable</Term>, someone types its name slightly wrong, and the parse produces something that is not a number. Coerce that carelessly and your ceiling is `0`, which means every send is over the limit, which means — with enforcement on — a service that quietly sends nothing at all while reporting success on every request. Any configured limit needs a floor: if it is not a positive whole number, fall back to the built-in default rather than accepting the accident. This is a plain <Term>edge case</Term> that only ever shows up in production, because your machine has the setting spelled correctly.
+
+**The ceiling nobody revisits after the business grows.** You set the numbers from a quiet month, enforcement goes on, and it is correct for a year. Then a campaign lands and a genuinely good day trips a limit that was written for a smaller company. Because suppression is a deliberate non-action, it produces no errors — just team notifications that never arrive, on the one day everybody is watching the pipeline. A ceiling is a claim about normal, so it wants the same treatment as any other claim about normal: written down with the date and the traffic it was derived from, and re-read whenever that traffic changes.
+
+## Try this tonight
+
+Ten minutes, one file, no project. Save this as `meter.mjs` and read it before running it.
+
+```js
+const counts = new Map();
+const roundTrip = () => new Promise((done) => setTimeout(done, 5));
+
+// The naive counter: read, wait for the database, write back.
+async function bumpNaive(key) {
+  const current = counts.get(key) ?? 0;
+  await roundTrip();
+  counts.set(key, current + 1);
+  return current + 1;
+}
+
+// The atomic one: nothing may interleave between reading and writing.
+function bumpAtomic(key) {
+  const next = (counts.get(key) ?? 0) + 1;
+  counts.set(key, next);
+  return next;
+}
+
+const RECIPIENTS = 3;
+const sendsPerSubmission = 1 + 2 + RECIPIENTS * 2;
+console.log("sends from 5 submissions:", 5 * sendsPerSubmission);
+
+await Promise.all(Array.from({ length: 20 }, () => bumpNaive("email")));
+console.log("naive total after 20 concurrent sends:", counts.get("email"));
+
+counts.clear();
+Array.from({ length: 20 }, () => bumpAtomic("email"));
+console.log("atomic total after 20 concurrent sends:", counts.get("email"));
+```
+
+**Predict all three numbers before you run it.** The first is arithmetic. The other two are the interesting ones: say out loud what the naive counter prints after twenty sends that all started before any of them finished, and then whether the atomic version agrees with it. Run it with `node meter.mjs`.
+
+If the second number surprised you, sit with it for a second — because that gap is not a JavaScript curiosity. It is what a counter does under exactly the burst you fitted it for, and it is the reason the real version is one statement in the database rather than three lines in your service.
+
+<Quiz>
+  <Question q="Your rate limit is set to 60 requests a minute and has never been hit. Why is that not a statement about how much a busy hour can cost you?">
+    Because a request is not a unit of spend. One accepted submission can fan out into a model call, two messages to the customer and two more per teammate on a notification list — so the cost is requests multiplied by a fan-out that lives elsewhere in the code and changes when someone edits a table in the dashboard. The cap counts arrivals faithfully and says nothing about the quantity you are billed for.
+  </Question>
+  <Question q="Why ship a spend ceiling in a mode that counts and warns but never blocks, instead of enforcing it straight away?">
+    Because a ceiling is a claim about what a normal day looks like, and before you have measured you are guessing. A guessed limit that enforces will one day suppress real customer confirmations and team alerts on your busiest day, and suppression produces no errors, so the failure looks like nothing happening. Observing first is free, changes no behaviour, and gives you the real distribution to set the number from — then enforcement is one deliberate setting change made against data.
+  </Question>
+  <Question q="Where in a send function should the counter be incremented, and what goes wrong if you put it at the top?">
+    After every early return that means no send will actually happen — missing credentials, an unconfigured provider, a suppressed duplicate — and before the call that costs money. At the top it meters attempts rather than deliveries, so a spell of missing credentials inflates the day's count with sends that never left the building, and once enforcement is on those phantom units suppress real messages later the same day.
+  </Question>
+</Quiz>
+
+<Takeaway>
+A request cap counts the door — put a counter on the thing that actually costs money, and let it watch for a while before it is allowed to stop anything. One number, incremented where the money leaves, is worth more than any amount of care taken at the entrance.
+</Takeaway>
